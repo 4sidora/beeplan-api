@@ -1,0 +1,30 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: beeplan
+      POSTGRES_PASSWORD: beeplan
+      POSTGRES_DB: beeplan
+    ports:
+      - "5432:5432"
+    volumes:
+      - beeplan_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U beeplan -d beeplan"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://beeplan:beeplan@db:5432/beeplan
+      JWT_SECRET: dev-secret-change-in-production
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  beeplan_pg:

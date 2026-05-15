@@ -1,0 +1,155 @@
+openapi: 3.0.3
+info:
+  title: BeePlan API
+  version: "0.1.0"
+servers:
+  - url: http://localhost:8000
+paths:
+  /v1/health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+  /v1/auth/register:
+    post:
+      summary: Register user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+      responses:
+        "200": { description: Created user }
+  /v1/auth/token:
+    post:
+      summary: Login (password grant style)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: JWT access token
+  /v1/me:
+    get:
+      summary: Current user
+      security:
+        - bearerAuth: []
+      responses:
+        "200": { description: User }
+  /v1/apiaries:
+    get:
+      summary: List apiaries
+      security:
+        - bearerAuth: []
+      responses:
+        "200": { description: List }
+  /v1/colonies:
+    get:
+      summary: List colonies for apiary
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: apiary_id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: List }
+  /v1/edge-devices:
+    get:
+      summary: List edge devices for apiary
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: apiary_id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: List }
+  /v1/edge-devices/{device_id}/colony:
+    put:
+      summary: Set active colony for device (writes assignment history)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: device_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                colony_id: { type: integer, nullable: true }
+      responses:
+        "200": { description: Updated device }
+  /v1/telemetry/batch:
+    post:
+      summary: Ingest telemetry samples from concentrator
+      security:
+        - concentratorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [samples]
+              properties:
+                samples:
+                  type: array
+                  items:
+                    type: object
+                    required: [device_public_id, metric, ts, value]
+                    properties:
+                      device_public_id: { type: string }
+                      metric: { type: string }
+                      ts: { type: string, format: date-time }
+                      value: {}
+      responses:
+        "200": { description: Batch result }
+  /v1/colonies/{colony_id}/telemetry:
+    get:
+      summary: Query telemetry for colony
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: colony_id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: metric
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 500 }
+      responses:
+        "200": { description: Points }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    concentratorBearer:
+      type: http
+      scheme: bearer
+      description: Use concentrator ingest_token as Bearer value
