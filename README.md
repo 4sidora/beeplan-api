@@ -2,7 +2,7 @@
 
 REST API для BeePlan: телеметрия с концентраторов, доменная модель, OpenAPI.
 
-Архитектура и общие требования: репозиторий [**beeplan-docs**](https://github.com/beeplan/beeplan-docs) ([ARCHITECTURE.md](https://github.com/beeplan/beeplan-docs/blob/main/ARCHITECTURE.md)). Замените `github.com/beeplan`, если ваш org другой.
+Архитектура и общие требования: репозиторий [**beeplan-docs**](https://github.com/4sidora/beeplan-docs) ([ARCHITECTURE.md](https://github.com/4sidora/beeplan-docs/blob/main/ARCHITECTURE.md)).
 
 ## Требования
 
