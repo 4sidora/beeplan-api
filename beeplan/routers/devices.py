@@ -31,6 +31,18 @@ from beeplan.schemas import (
 router = APIRouter(prefix="/v1", tags=["devices"])
 
 
+def _device_out(device: EdgeDevice, db: Session) -> EdgeDeviceOut:
+    conc = db.get(Concentrator, device.concentrator_id)
+    return EdgeDeviceOut(
+        id=device.id,
+        concentrator_id=device.concentrator_id,
+        concentrator_name=conc.name if conc else None,
+        public_id=device.public_id,
+        label=device.label,
+        current_colony_id=device.current_colony_id,
+    )
+
+
 def _ensure_device_owned(db: Session, user: User, device_id: int) -> EdgeDevice:
     device = db.get(EdgeDevice, device_id)
     if device is None:
@@ -94,7 +106,7 @@ def list_edge_devices(
     apiary_id: int,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> list[EdgeDevice]:
+) -> list[EdgeDeviceOut]:
     apiary = db.get(Apiary, apiary_id)
     if apiary is None or apiary.user_id != user.id:
         return []
@@ -103,7 +115,10 @@ def list_edge_devices(
     )
     if not conc_ids:
         return []
-    return list(db.scalars(select(EdgeDevice).where(EdgeDevice.concentrator_id.in_(conc_ids))).all())
+    devices = list(
+        db.scalars(select(EdgeDevice).where(EdgeDevice.concentrator_id.in_(conc_ids))).all()
+    )
+    return [_device_out(d, db) for d in devices]
 
 
 @router.post("/edge-devices", response_model=EdgeDeviceOut, status_code=status.HTTP_201_CREATED)
@@ -111,7 +126,7 @@ def create_edge_device(
     body: EdgeDeviceCreate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> EdgeDevice:
+) -> EdgeDeviceOut:
     _ensure_concentrator_owned(db, user, body.concentrator_id)
     device = EdgeDevice(
         concentrator_id=body.concentrator_id,
@@ -131,7 +146,7 @@ def create_edge_device(
     db.add(device)
     db.commit()
     db.refresh(device)
-    return device
+    return _device_out(device, db)
 
 
 @router.patch("/edge-devices/{device_id}", response_model=EdgeDeviceOut)
@@ -153,7 +168,7 @@ def update_edge_device(
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Device public_id already exists")
     db.refresh(device)
-    return device
+    return _device_out(device, db)
 
 
 @router.delete("/edge-devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -179,7 +194,7 @@ def set_device_colony(
     db.add(device)
     db.commit()
     db.refresh(device)
-    return device
+    return _device_out(device, db)
 
 
 @router.post("/telemetry/batch", response_model=TelemetryBatchOut)

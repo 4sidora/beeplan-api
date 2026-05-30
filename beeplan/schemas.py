@@ -54,19 +54,41 @@ class ColonyOut(BaseModel):
     apiary_id: int
     name: str
     bee_breed: str | None = None
+    description: str | None = None
+    colony_type: str | None = None
+    hive_type: str | None = None
+    body_count: int | None = None
+    frames_per_body: int | None = None
+    hive_volume_m3: float | None = None
 
     model_config = {"from_attributes": True}
+
+
+class ColonyNameOut(BaseModel):
+    name: str
 
 
 class ColonyCreate(BaseModel):
     apiary_id: int
     name: str = Field(min_length=1, max_length=255)
     bee_breed: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+    colony_type: str | None = Field(default=None, max_length=32)
+    hive_type: str | None = Field(default=None, max_length=64)
+    body_count: int | None = Field(default=None, ge=1)
+    frames_per_body: int | None = Field(default=None, ge=1)
+    hive_volume_m3: float | None = Field(default=None, gt=0)
 
 
 class ColonyUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     bee_breed: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+    colony_type: str | None = Field(default=None, max_length=32)
+    hive_type: str | None = Field(default=None, max_length=64)
+    body_count: int | None = Field(default=None, ge=1)
+    frames_per_body: int | None = Field(default=None, ge=1)
+    hive_volume_m3: float | None = Field(default=None, gt=0)
 
 
 class ConcentratorOut(BaseModel):
@@ -90,6 +112,7 @@ class ConcentratorUpdate(BaseModel):
 class EdgeDeviceOut(BaseModel):
     id: int
     concentrator_id: int
+    concentrator_name: str | None = None
     public_id: str
     label: str | None
     current_colony_id: int | None

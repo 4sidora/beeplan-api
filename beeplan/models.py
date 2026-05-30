@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, JSON, String, text
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, Text, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -60,6 +60,12 @@ class Colony(Base):
     apiary_id: Mapped[int] = mapped_column(ForeignKey("apiaries.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     bee_breed: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    colony_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    hive_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    body_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    frames_per_body: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hive_volume_m3: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 
     apiary: Mapped[Apiary] = relationship(back_populates="colonies")

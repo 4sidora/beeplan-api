@@ -6,6 +6,9 @@ import uuid
 
 from sqlalchemy import select
 
+import random
+
+from beeplan.colony_names import generate_colony_name
 from beeplan.database import SessionLocal
 from beeplan.models import Apiary, Colony, Concentrator, EdgeDevice, EdgeDeviceColonyAssignment, User
 from beeplan.security import hash_password
@@ -47,7 +50,11 @@ def main() -> None:
         db.add(conc)
         db.flush()
 
-        colony = Colony(apiary_id=apiary.id, name="Семья №1", bee_breed="Карникола")
+        colony = Colony(
+            apiary_id=apiary.id,
+            name=generate_colony_name(random.Random(42)),
+            bee_breed="Карникола",
+        )
         db.add(colony)
         db.flush()
 

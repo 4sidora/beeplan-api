@@ -10,12 +10,15 @@ from sqlalchemy.orm import Session
 from beeplan.database import get_db
 from beeplan.deps import get_current_user
 from beeplan.models import Apiary, BeeBreed, Colony, Concentrator, User
+from beeplan.colony_catalog import apply_colony_payload, validate_colony_fields
+from beeplan.colony_names import generate_colony_name
 from beeplan.schemas import (
     ApiaryCreate,
     ApiaryOut,
     ApiaryUpdate,
     BeeBreedOut,
     ColonyCreate,
+    ColonyNameOut,
     ColonyOut,
     ColonyUpdate,
     ConcentratorCreate,
@@ -114,6 +117,14 @@ def delete_apiary(
     db.commit()
 
 
+@router.get("/colonies/suggested-name", response_model=ColonyNameOut)
+def suggested_colony_name(
+    user: User = Depends(get_current_user),
+) -> ColonyNameOut:
+    del user
+    return ColonyNameOut(name=generate_colony_name())
+
+
 @router.get("/colonies", response_model=list[ColonyOut])
 def list_colonies(
     apiary_id: int,
@@ -141,7 +152,18 @@ def create_colony(
 ) -> Colony:
     _ensure_apiary_owned(db, user, body.apiary_id)
     _validate_bee_breed(db, body.bee_breed)
+    validate_colony_fields(
+        colony_type=body.colony_type,
+        hive_type=body.hive_type,
+        body_count=body.body_count,
+        frames_per_body=body.frames_per_body,
+        hive_volume_m3=body.hive_volume_m3,
+    )
     colony = Colony(apiary_id=body.apiary_id, name=body.name, bee_breed=body.bee_breed)
+    apply_colony_payload(
+        colony,
+        body.model_dump(exclude={"apiary_id"}),
+    )
     db.add(colony)
     db.commit()
     db.refresh(colony)
@@ -157,8 +179,14 @@ def update_colony(
 ) -> Colony:
     colony = _ensure_colony_owned(db, user, colony_id)
     _validate_bee_breed(db, body.bee_breed)
-    colony.name = body.name
-    colony.bee_breed = body.bee_breed
+    validate_colony_fields(
+        colony_type=body.colony_type,
+        hive_type=body.hive_type,
+        body_count=body.body_count,
+        frames_per_body=body.frames_per_body,
+        hive_volume_m3=body.hive_volume_m3,
+    )
+    apply_colony_payload(colony, body.model_dump())
     db.add(colony)
     db.commit()
     db.refresh(colony)

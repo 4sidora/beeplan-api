@@ -103,6 +103,28 @@ paths:
           schema: { type: integer }
       responses:
         "204": { description: Deleted }
+  /v1/bee-breeds:
+    get:
+      summary: List bee breeds (read-only catalog)
+      security:
+        - bearerAuth: []
+      responses:
+        "200": { description: List of breeds }
+  /v1/colonies/suggested-name:
+    get:
+      summary: Suggest auto-generated colony name
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Suggested name
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name]
+                properties:
+                  name: { type: string, example: "Альбина 034" }
   /v1/colonies:
     get:
       summary: List colonies for apiary
@@ -130,6 +152,12 @@ paths:
                 apiary_id: { type: integer }
                 name: { type: string }
                 bee_breed: { type: string, nullable: true }
+                description: { type: string, nullable: true }
+                colony_type: { type: string, nullable: true, enum: [split, nucleus, colony, swarm] }
+                hive_type: { type: string, nullable: true }
+                body_count: { type: integer, nullable: true }
+                frames_per_body: { type: integer, nullable: true }
+                hive_volume_m3: { type: number, nullable: true }
       responses:
         "201": { description: Created colony }
   /v1/colonies/{colony_id}:
@@ -163,6 +191,12 @@ paths:
               properties:
                 name: { type: string }
                 bee_breed: { type: string, nullable: true }
+                description: { type: string, nullable: true }
+                colony_type: { type: string, nullable: true, enum: [split, nucleus, colony, swarm] }
+                hive_type: { type: string, nullable: true }
+                body_count: { type: integer, nullable: true }
+                frames_per_body: { type: integer, nullable: true }
+                hive_volume_m3: { type: number, nullable: true }
       responses:
         "200": { description: Updated colony }
     delete:
