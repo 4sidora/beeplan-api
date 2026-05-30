@@ -7,7 +7,7 @@ from beeplan.config import get_settings
 from beeplan.deps import get_current_user
 from beeplan.models import User
 from beeplan.schemas import UserOut
-from beeplan.routers import auth, catalog, devices, health
+from beeplan.routers import auth, catalog, devices, firmware, health
 
 settings = get_settings()
 
@@ -25,6 +25,7 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(catalog.router)
 app.include_router(devices.router)
+app.include_router(firmware.router)
 
 
 @app.get("/v1/me", response_model=UserOut)

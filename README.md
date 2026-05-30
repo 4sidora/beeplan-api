@@ -36,7 +36,9 @@ $env:PYTHONPATH = (Get-Location).Path
 py -3 -m uvicorn beeplan.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Скрипт `seed_dev` выведет URL API, учётные данные пользователя и **ingest_token** концентратора — сохраните его для `beeplan-gateway`.
+Скрипт `seed_dev` выведет URL API, учётные данные пользователя и **ingest_token** концентратора.
+
+Для **веб-прошивки** поднимите также **beeplan-builder** (см. `docker compose up` — сервис `builder` на порту 9000).
 
 - Документация интерактивно: http://localhost:8000/docs  
 - OpenAPI YAML: [docs/openapi.yaml](docs/openapi.yaml)

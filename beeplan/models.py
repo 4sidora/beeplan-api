@@ -45,6 +45,9 @@ class Concentrator(Base):
     apiary_id: Mapped[int] = mapped_column(ForeignKey("apiaries.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     ingest_token: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
+    gateway_mac: Mapped[str | None] = mapped_column(String(17), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    firmware_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 
     apiary: Mapped[Apiary] = relationship(back_populates="concentrators")
@@ -89,6 +92,7 @@ class EdgeDevice(Base):
     concentrator_id: Mapped[int] = mapped_column(ForeignKey("concentrators.id", ondelete="CASCADE"))
     public_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    hardware_mac: Mapped[str | None] = mapped_column(String(17), nullable=True)
     current_colony_id: Mapped[int | None] = mapped_column(ForeignKey("colonies.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 
@@ -123,3 +127,19 @@ class TelemetrySample(Base):
     metric: Mapped[str] = mapped_column(String(64), nullable=False)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     value: Mapped[dict | list | str | float | int | bool | None] = mapped_column(JSON, nullable=False)
+
+
+class FirmwareBuild(Base):
+    __tablename__ = "firmware_builds"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    device_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    board: Mapped[str] = mapped_column(String(32), nullable=False)
+    concentrator_id: Mapped[int] = mapped_column(ForeignKey("concentrators.id", ondelete="CASCADE"))
+    edge_device_id: Mapped[int | None] = mapped_column(ForeignKey("edge_devices.id", ondelete="SET NULL"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="queued")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

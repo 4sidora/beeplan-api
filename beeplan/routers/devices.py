@@ -19,6 +19,8 @@ from beeplan.models import (
     User,
 )
 from beeplan.schemas import (
+    ConcentratorHeartbeatIn,
+    ConcentratorHeartbeatOut,
     EdgeDeviceCreate,
     EdgeDeviceOut,
     EdgeDeviceUpdate,
@@ -29,6 +31,14 @@ from beeplan.schemas import (
 )
 
 router = APIRouter(prefix="/v1", tags=["devices"])
+
+
+def _normalize_mac(mac: str) -> str:
+    cleaned = mac.strip().upper().replace("-", ":")
+    parts = cleaned.split(":")
+    if len(parts) != 6 or not all(len(p) == 2 and all(c in "0123456789ABCDEF" for c in p) for p in parts):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid MAC address format")
+    return ":".join(parts)
 
 
 def _device_out(device: EdgeDevice, db: Session) -> EdgeDeviceOut:
@@ -195,6 +205,22 @@ def set_device_colony(
     db.commit()
     db.refresh(device)
     return _device_out(device, db)
+
+
+@router.post("/concentrators/heartbeat", response_model=ConcentratorHeartbeatOut)
+def concentrator_heartbeat(
+    body: ConcentratorHeartbeatIn,
+    db: Session = Depends(get_db),
+    concentrator: Concentrator = Depends(require_concentrator),
+) -> ConcentratorHeartbeatOut:
+    mac = _normalize_mac(body.mac)
+    concentrator.gateway_mac = mac
+    concentrator.last_seen_at = datetime.now(timezone.utc)
+    if body.firmware_version:
+        concentrator.firmware_version = body.firmware_version
+    db.add(concentrator)
+    db.commit()
+    return ConcentratorHeartbeatOut(gateway_mac=mac)
 
 
 @router.post("/telemetry/batch", response_model=TelemetryBatchOut)

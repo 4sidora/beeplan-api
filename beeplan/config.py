@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 7
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    builder_url: str = "http://localhost:9000"
+    builder_secret: str = "dev-builder-secret"
+    firmware_build_ttl_minutes: int = 60
+    firmware_builds_per_hour: int = 10
+    public_api_base_url: str = "http://localhost:8000"
 
 
 def get_settings() -> Settings:

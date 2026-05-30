@@ -232,6 +232,15 @@ def create_concentrator(
     return conc
 
 
+@router.get("/concentrators/{concentrator_id}", response_model=ConcentratorOut)
+def get_concentrator(
+    concentrator_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Concentrator:
+    return _ensure_concentrator_owned(db, user, concentrator_id)
+
+
 @router.patch("/concentrators/{concentrator_id}", response_model=ConcentratorOut)
 def update_concentrator(
     concentrator_id: int,

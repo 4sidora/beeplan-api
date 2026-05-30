@@ -15,6 +15,21 @@ services:
       timeout: 5s
       retries: 10
 
+  builder:
+    build:
+      context: ..
+      dockerfile: beeplan-builder/Dockerfile
+    ports:
+      - "9000:9000"
+    environment:
+      BEEPLAN_BUILDER_SECRET: dev-builder-secret
+    volumes:
+      - firmware_artifacts:/artifacts
+      # Dev: pick up firmware source changes without rebuilding the image
+      - ../beeplan-gateway:/firmware/gateway
+      - ../beeplan-edge:/firmware/edge
+      - ../beeplan-builder/builder:/app/builder
+
   api:
     build: .
     ports:
@@ -22,9 +37,15 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://beeplan:beeplan@db:5432/beeplan
       JWT_SECRET: dev-secret-change-in-production
+      BUILDER_URL: http://builder:9000
+      BUILDER_SECRET: dev-builder-secret
+      PUBLIC_API_BASE_URL: http://host.docker.internal:8000
     depends_on:
       db:
         condition: service_healthy
+      builder:
+        condition: service_started
 
 volumes:
   beeplan_pg:
+  firmware_artifacts:

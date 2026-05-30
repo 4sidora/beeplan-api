@@ -96,6 +96,9 @@ class ConcentratorOut(BaseModel):
     apiary_id: int
     name: str
     ingest_token: str
+    gateway_mac: str | None = None
+    last_seen_at: datetime | None = None
+    firmware_version: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -159,3 +162,40 @@ class EdgeDeviceUpdate(BaseModel):
 
 class SetColonyBody(BaseModel):
     colony_id: int | None = Field(description="Active colony for this device; null to detach")
+
+
+class ConcentratorHeartbeatIn(BaseModel):
+    mac: str = Field(min_length=11, max_length=17)
+    firmware_version: str | None = Field(default=None, max_length=32)
+
+
+class ConcentratorHeartbeatOut(BaseModel):
+    ok: bool = True
+    gateway_mac: str
+
+
+class FirmwareBuildCreate(BaseModel):
+    device_type: str = Field(pattern="^(gateway|edge)$")
+    board: str = Field(default="esp32dev", max_length=32)
+    concentrator_id: int
+    edge_device_id: int | None = None
+    wifi_ssid: str | None = Field(default=None, max_length=64)
+    wifi_password: str | None = Field(default=None, max_length=128)
+    api_base_url: str | None = Field(default=None, max_length=256)
+    wake_interval_sec: int = Field(default=600, ge=10, le=86400)
+
+
+class FirmwareBuildOut(BaseModel):
+    id: str
+    device_type: str
+    board: str
+    concentrator_id: int
+    edge_device_id: int | None
+    status: str
+    error: str | None = None
+    manifest_url: str | None = None
+    expires_at: datetime
+    created_at: datetime
+    finished_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
