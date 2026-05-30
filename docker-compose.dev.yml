@@ -1,0 +1,22 @@
+# Только PostgreSQL для локальной разработки (порт 5433, чтобы не конфликтовать с установленным PG на 5432).
+# Запуск: docker compose -f docker-compose.dev.yml up -d
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: beeplan
+      POSTGRES_PASSWORD: beeplan
+      POSTGRES_DB: beeplan
+    ports:
+      - "5433:5432"
+    volumes:
+      - beeplan_pg_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U beeplan -d beeplan"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  beeplan_pg_dev:

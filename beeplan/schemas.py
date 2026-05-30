@@ -34,12 +34,57 @@ class ApiaryOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ApiaryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
+class ApiaryUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
+class BeeBreedOut(BaseModel):
+    id: int
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
 class ColonyOut(BaseModel):
     id: int
     apiary_id: int
     name: str
+    bee_breed: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class ColonyCreate(BaseModel):
+    apiary_id: int
+    name: str = Field(min_length=1, max_length=255)
+    bee_breed: str | None = Field(default=None, max_length=255)
+
+
+class ColonyUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    bee_breed: str | None = Field(default=None, max_length=255)
+
+
+class ConcentratorOut(BaseModel):
+    id: int
+    apiary_id: int
+    name: str
+    ingest_token: str
+
+    model_config = {"from_attributes": True}
+
+
+class ConcentratorCreate(BaseModel):
+    apiary_id: int
+    name: str = Field(min_length=1, max_length=255)
+
+
+class ConcentratorUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
 
 
 class EdgeDeviceOut(BaseModel):
@@ -75,6 +120,18 @@ class TelemetryPointOut(BaseModel):
     value: dict | list | str | float | int | bool | None
 
     model_config = {"from_attributes": True}
+
+
+class EdgeDeviceCreate(BaseModel):
+    concentrator_id: int
+    public_id: str = Field(min_length=1, max_length=64)
+    label: str | None = Field(default=None, max_length=255)
+    colony_id: int | None = None
+
+
+class EdgeDeviceUpdate(BaseModel):
+    public_id: str | None = Field(default=None, min_length=1, max_length=64)
+    label: str | None = Field(default=None, max_length=255)
 
 
 class SetColonyBody(BaseModel):

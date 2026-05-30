@@ -32,8 +32,10 @@ class Apiary(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 
     owner: Mapped[User] = relationship(back_populates="apiaries")
-    concentrators: Mapped[list[Concentrator]] = relationship(back_populates="apiary")
-    colonies: Mapped[list[Colony]] = relationship(back_populates="apiary")
+    concentrators: Mapped[list[Concentrator]] = relationship(
+        back_populates="apiary", passive_deletes=True
+    )
+    colonies: Mapped[list[Colony]] = relationship(back_populates="apiary", passive_deletes=True)
 
 
 class Concentrator(Base):
@@ -46,7 +48,9 @@ class Concentrator(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 
     apiary: Mapped[Apiary] = relationship(back_populates="concentrators")
-    edge_devices: Mapped[list[EdgeDevice]] = relationship(back_populates="concentrator")
+    edge_devices: Mapped[list[EdgeDevice]] = relationship(
+        back_populates="concentrator", passive_deletes=True
+    )
 
 
 class Colony(Base):
@@ -55,6 +59,7 @@ class Colony(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     apiary_id: Mapped[int] = mapped_column(ForeignKey("apiaries.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    bee_breed: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 
     apiary: Mapped[Apiary] = relationship(back_populates="colonies")
@@ -62,6 +67,13 @@ class Colony(Base):
         back_populates="colony",
         foreign_keys="EdgeDeviceColonyAssignment.colony_id",
     )
+
+
+class BeeBreed(Base):
+    __tablename__ = "bee_breeds"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
 
 
 class EdgeDevice(Base):

@@ -10,17 +10,31 @@ from beeplan.database import SessionLocal
 from beeplan.models import Apiary, Colony, Concentrator, EdgeDevice, EdgeDeviceColonyAssignment, User
 from beeplan.security import hash_password
 
+DEV_EMAIL = "dev@example.com"
+LEGACY_DEV_EMAIL = "dev@beeplan.local"
+DEV_PASSWORD = "devpassword"
+
 
 def main() -> None:
     db = SessionLocal()
     try:
-        email = "dev@beeplan.local"
+        email = DEV_EMAIL
         existing = db.scalars(select(User).where(User.email == email)).first()
         if existing:
             print("Seed already applied (user exists).")
+            print(f"  User: {email} / {DEV_PASSWORD}")
+            print("  Для тестовых графиков: python -m beeplan.seed_demo_data")
             return
 
-        user = User(email=email, hashed_password=hash_password("devpassword"))
+        legacy = db.scalars(select(User).where(User.email == LEGACY_DEV_EMAIL)).first()
+        if legacy:
+            legacy.email = email
+            db.commit()
+            print("BeePlan dev seed: migrated legacy user email.")
+            print(f"  User: {email} / {DEV_PASSWORD}")
+            return
+
+        user = User(email=email, hashed_password=hash_password(DEV_PASSWORD))
         db.add(user)
         db.flush()
 
@@ -33,7 +47,7 @@ def main() -> None:
         db.add(conc)
         db.flush()
 
-        colony = Colony(apiary_id=apiary.id, name="Семья №1")
+        colony = Colony(apiary_id=apiary.id, name="Семья №1", bee_breed="Карникола")
         db.add(colony)
         db.flush()
 
@@ -54,10 +68,11 @@ def main() -> None:
         db.commit()
 
         print("BeePlan dev seed created.")
-        print(f"  User: {email} / devpassword")
+        print(f"  User: {email} / {DEV_PASSWORD}")
         print("  Authorization for gateway (ingest):")
         print(f"    Authorization: Bearer {token}")
         print("  Edge device public_id for telemetry: dev-edge-1")
+        print("  Демо-графики: python -m beeplan.seed_demo_data")
     finally:
         db.close()
 

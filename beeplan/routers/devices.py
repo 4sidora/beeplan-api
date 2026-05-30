@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from beeplan.database import get_db
@@ -17,7 +18,15 @@ from beeplan.models import (
     TelemetrySample,
     User,
 )
-from beeplan.schemas import EdgeDeviceOut, SetColonyBody, TelemetryBatchIn, TelemetryBatchOut, TelemetryPointOut
+from beeplan.schemas import (
+    EdgeDeviceCreate,
+    EdgeDeviceOut,
+    EdgeDeviceUpdate,
+    SetColonyBody,
+    TelemetryBatchIn,
+    TelemetryBatchOut,
+    TelemetryPointOut,
+)
 
 router = APIRouter(prefix="/v1", tags=["devices"])
 
@@ -33,6 +42,51 @@ def _ensure_device_owned(db: Session, user: User, device_id: int) -> EdgeDevice:
     if apiary is None or apiary.user_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Forbidden")
     return device
+
+
+def _ensure_concentrator_owned(db: Session, user: User, concentrator_id: int) -> Concentrator:
+    conc = db.get(Concentrator, concentrator_id)
+    if conc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Concentrator not found")
+    apiary = db.get(Apiary, conc.apiary_id)
+    if apiary is None or apiary.user_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Forbidden")
+    return conc
+
+
+def _apply_colony_assignment(
+    db: Session,
+    device: EdgeDevice,
+    colony_id: int | None,
+    *,
+    now: datetime | None = None,
+) -> None:
+    now = now or datetime.now(timezone.utc)
+
+    if colony_id is not None:
+        colony = db.get(Colony, colony_id)
+        if colony is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Colony not found")
+        conc = db.get(Concentrator, device.concentrator_id)
+        if conc is None or colony.apiary_id != conc.apiary_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Colony must belong to the same apiary as the device")
+
+    open_rows = list(
+        db.scalars(
+            select(EdgeDeviceColonyAssignment).where(
+                EdgeDeviceColonyAssignment.device_id == device.id,
+                EdgeDeviceColonyAssignment.detached_at.is_(None),
+            )
+        ).all()
+    )
+    for row in open_rows:
+        row.detached_at = now
+
+    if colony_id is not None:
+        db.add(EdgeDeviceColonyAssignment(device_id=device.id, colony_id=colony_id, attached_at=now))
+        device.current_colony_id = colony_id
+    else:
+        device.current_colony_id = None
 
 
 @router.get("/edge-devices", response_model=list[EdgeDeviceOut])
@@ -52,6 +106,67 @@ def list_edge_devices(
     return list(db.scalars(select(EdgeDevice).where(EdgeDevice.concentrator_id.in_(conc_ids))).all())
 
 
+@router.post("/edge-devices", response_model=EdgeDeviceOut, status_code=status.HTTP_201_CREATED)
+def create_edge_device(
+    body: EdgeDeviceCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> EdgeDevice:
+    _ensure_concentrator_owned(db, user, body.concentrator_id)
+    device = EdgeDevice(
+        concentrator_id=body.concentrator_id,
+        public_id=body.public_id,
+        label=body.label,
+    )
+    db.add(device)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "Device public_id already exists")
+
+    if body.colony_id is not None:
+        _apply_colony_assignment(db, device, body.colony_id)
+
+    db.add(device)
+    db.commit()
+    db.refresh(device)
+    return device
+
+
+@router.patch("/edge-devices/{device_id}", response_model=EdgeDeviceOut)
+def update_edge_device(
+    device_id: int,
+    body: EdgeDeviceUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> EdgeDevice:
+    device = _ensure_device_owned(db, user, device_id)
+    if body.public_id is not None:
+        device.public_id = body.public_id
+    if body.label is not None:
+        device.label = body.label
+    db.add(device)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "Device public_id already exists")
+    db.refresh(device)
+    return device
+
+
+@router.delete("/edge-devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_edge_device(
+    device_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    device = _ensure_device_owned(db, user, device_id)
+    db.delete(device)
+    db.commit()
+
+
 @router.put("/edge-devices/{device_id}/colony", response_model=EdgeDeviceOut)
 def set_device_colony(
     device_id: int,
@@ -60,33 +175,7 @@ def set_device_colony(
     user: User = Depends(get_current_user),
 ) -> EdgeDevice:
     device = _ensure_device_owned(db, user, device_id)
-    now = datetime.now(timezone.utc)
-
-    if body.colony_id is not None:
-        colony = db.get(Colony, body.colony_id)
-        if colony is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Colony not found")
-        conc = db.get(Concentrator, device.concentrator_id)
-        if conc is None or colony.apiary_id != conc.apiary_id:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Colony must belong to the same apiary as the device")
-
-    open_rows = list(
-        db.scalars(
-            select(EdgeDeviceColonyAssignment).where(
-                EdgeDeviceColonyAssignment.device_id == device.id,
-                EdgeDeviceColonyAssignment.detached_at.is_(None),
-            )
-        ).all()
-    )
-    for row in open_rows:
-        row.detached_at = now
-
-    if body.colony_id is not None:
-        db.add(EdgeDeviceColonyAssignment(device_id=device.id, colony_id=body.colony_id, attached_at=now))
-        device.current_colony_id = body.colony_id
-    else:
-        device.current_colony_id = None
-
+    _apply_colony_assignment(db, device, body.colony_id)
     db.add(device)
     db.commit()
     db.refresh(device)
@@ -138,6 +227,8 @@ def get_colony_telemetry(
     colony_id: int,
     metric: str | None = None,
     limit: int = 500,
+    from_ts: datetime | None = Query(default=None, alias="from"),
+    to_ts: datetime | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[TelemetrySample]:
@@ -148,10 +239,14 @@ def get_colony_telemetry(
     if apiary is None or apiary.user_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Forbidden")
 
-    stmt = select(TelemetrySample).where(TelemetrySample.colony_id == colony_id).order_by(TelemetrySample.ts.desc())
+    stmt = select(TelemetrySample).where(TelemetrySample.colony_id == colony_id)
     if metric:
         stmt = stmt.where(TelemetrySample.metric == metric)
-    stmt = stmt.limit(min(limit, 5000))
+    if from_ts is not None:
+        stmt = stmt.where(TelemetrySample.ts >= from_ts)
+    if to_ts is not None:
+        stmt = stmt.where(TelemetrySample.ts <= to_ts)
+    stmt = stmt.order_by(TelemetrySample.ts.desc()).limit(min(limit, 5000))
     rows = list(db.scalars(stmt).all())
     rows.reverse()
     return rows

@@ -26,6 +26,7 @@ $env:PYTHONPATH = (Get-Location).Path
 py -3 -m pip install -r requirements.txt   # на Windows может понадобиться MSVC Build Tools для greenlet
 py -3 -m alembic upgrade head
 py -3 -m beeplan.seed_dev
+py -3 -m beeplan.seed_demo_data   # семьи, ульи, 2 недели телеметрии
 ```
 
 Если API запущен локально через `uvicorn`:

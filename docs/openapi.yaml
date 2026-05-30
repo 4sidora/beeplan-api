@@ -56,6 +56,53 @@ paths:
         - bearerAuth: []
       responses:
         "200": { description: List }
+    post:
+      summary: Create apiary
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "201": { description: Created apiary }
+  /v1/apiaries/{apiary_id}:
+    patch:
+      summary: Update apiary
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: apiary_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200": { description: Updated apiary }
+    delete:
+      summary: Delete apiary
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: apiary_id
+          required: true
+          schema: { type: integer }
+      responses:
+        "204": { description: Deleted }
   /v1/colonies:
     get:
       summary: List colonies for apiary
@@ -68,6 +115,127 @@ paths:
           schema: { type: integer }
       responses:
         "200": { description: List }
+    post:
+      summary: Create colony
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [apiary_id, name]
+              properties:
+                apiary_id: { type: integer }
+                name: { type: string }
+                bee_breed: { type: string, nullable: true }
+      responses:
+        "201": { description: Created colony }
+  /v1/colonies/{colony_id}:
+    get:
+      summary: Get colony
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: colony_id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: Colony }
+    patch:
+      summary: Update colony
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: colony_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                bee_breed: { type: string, nullable: true }
+      responses:
+        "200": { description: Updated colony }
+    delete:
+      summary: Delete colony
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: colony_id
+          required: true
+          schema: { type: integer }
+      responses:
+        "204": { description: Deleted }
+  /v1/concentrators:
+    get:
+      summary: List concentrators for apiary
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: apiary_id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: List }
+    post:
+      summary: Create concentrator
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [apiary_id, name]
+              properties:
+                apiary_id: { type: integer }
+                name: { type: string }
+      responses:
+        "201": { description: Created concentrator with ingest_token }
+  /v1/concentrators/{concentrator_id}:
+    patch:
+      summary: Update concentrator
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: concentrator_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200": { description: Updated concentrator }
+    delete:
+      summary: Delete concentrator
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: concentrator_id
+          required: true
+          schema: { type: integer }
+      responses:
+        "204": { description: Deleted }
   /v1/edge-devices:
     get:
       summary: List edge devices for apiary
@@ -80,6 +248,56 @@ paths:
           schema: { type: integer }
       responses:
         "200": { description: List }
+    post:
+      summary: Create edge device
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [concentrator_id, public_id]
+              properties:
+                concentrator_id: { type: integer }
+                public_id: { type: string }
+                label: { type: string, nullable: true }
+                colony_id: { type: integer, nullable: true }
+      responses:
+        "201": { description: Created device }
+  /v1/edge-devices/{device_id}:
+    patch:
+      summary: Update edge device
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: device_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                public_id: { type: string }
+                label: { type: string, nullable: true }
+      responses:
+        "200": { description: Updated device }
+    delete:
+      summary: Delete edge device
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: device_id
+          required: true
+          schema: { type: integer }
+      responses:
+        "204": { description: Deleted }
   /v1/edge-devices/{device_id}/colony:
     put:
       summary: Set active colony for device (writes assignment history)
@@ -141,6 +359,14 @@ paths:
         - in: query
           name: limit
           schema: { type: integer, default: 500 }
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+          description: Inclusive start of time range
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+          description: Inclusive end of time range
       responses:
         "200": { description: Points }
 components:
