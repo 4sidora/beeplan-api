@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ from beeplan.models import (
     Concentrator,
     EdgeDevice,
     EdgeDeviceColonyAssignment,
+    EdgeDeviceTelemetrySample,
     TelemetrySample,
     User,
 )
@@ -32,6 +33,8 @@ from beeplan.schemas import (
 
 router = APIRouter(prefix="/v1", tags=["devices"])
 
+_UNBOUND_TELEMETRY_PREVIEW = 8
+
 
 def _normalize_mac(mac: str) -> str:
     cleaned = mac.strip().upper().replace("-", ":")
@@ -39,6 +42,23 @@ def _normalize_mac(mac: str) -> str:
     if len(parts) != 6 or not all(len(p) == 2 and all(c in "0123456789ABCDEF" for c in p) for p in parts):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid MAC address format")
     return ":".join(parts)
+
+
+def _telemetry_point(row: EdgeDeviceTelemetrySample | TelemetrySample) -> TelemetryPointOut:
+    return TelemetryPointOut(ts=row.ts, metric=row.metric, value=row.value)
+
+
+def _recent_unbound_telemetry(db: Session, device_id: int) -> list[TelemetryPointOut]:
+    rows = list(
+        db.scalars(
+            select(EdgeDeviceTelemetrySample)
+            .where(EdgeDeviceTelemetrySample.device_id == device_id)
+            .order_by(EdgeDeviceTelemetrySample.ts.desc())
+            .limit(_UNBOUND_TELEMETRY_PREVIEW)
+        ).all()
+    )
+    rows.reverse()
+    return [_telemetry_point(r) for r in rows]
 
 
 def _device_out(device: EdgeDevice, db: Session) -> EdgeDeviceOut:
@@ -50,6 +70,8 @@ def _device_out(device: EdgeDevice, db: Session) -> EdgeDeviceOut:
         public_id=device.public_id,
         label=device.label,
         current_colony_id=device.current_colony_id,
+        last_seen_at=device.last_seen_at,
+        recent_unbound_telemetry=_recent_unbound_telemetry(db, device.id),
     )
 
 
@@ -111,24 +133,83 @@ def _apply_colony_assignment(
         device.current_colony_id = None
 
 
+def _normalize_value(value: dict | list | str | float | int | bool | None) -> dict | list | str | float | int | bool | None:
+    if isinstance(value, (dict, list)):
+        return value
+    return {"v": value}
+
+
 @router.get("/edge-devices", response_model=list[EdgeDeviceOut])
 def list_edge_devices(
-    apiary_id: int,
+    apiary_id: int | None = Query(default=None),
+    concentrator_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[EdgeDeviceOut]:
-    apiary = db.get(Apiary, apiary_id)
-    if apiary is None or apiary.user_id != user.id:
-        return []
-    conc_ids = list(
-        db.scalars(select(Concentrator.id).where(Concentrator.apiary_id == apiary_id)).all()
-    )
+    if concentrator_id is not None:
+        _ensure_concentrator_owned(db, user, concentrator_id)
+        devices = list(
+            db.scalars(select(EdgeDevice).where(EdgeDevice.concentrator_id == concentrator_id)).all()
+        )
+        return [_device_out(d, db) for d in devices]
+
+    if apiary_id is not None:
+        apiary = db.get(Apiary, apiary_id)
+        if apiary is None or apiary.user_id != user.id:
+            return []
+        conc_ids = list(
+            db.scalars(select(Concentrator.id).where(Concentrator.apiary_id == apiary_id)).all()
+        )
+    else:
+        apiary_ids = list(
+            db.scalars(select(Apiary.id).where(Apiary.user_id == user.id)).all()
+        )
+        if not apiary_ids:
+            return []
+        conc_ids = list(
+            db.scalars(select(Concentrator.id).where(Concentrator.apiary_id.in_(apiary_ids))).all()
+        )
+
     if not conc_ids:
         return []
     devices = list(
         db.scalars(select(EdgeDevice).where(EdgeDevice.concentrator_id.in_(conc_ids))).all()
     )
     return [_device_out(d, db) for d in devices]
+
+
+@router.get("/edge-devices/{device_id}", response_model=EdgeDeviceOut)
+def get_edge_device(
+    device_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> EdgeDeviceOut:
+    device = _ensure_device_owned(db, user, device_id)
+    return _device_out(device, db)
+
+
+@router.get("/edge-devices/{device_id}/telemetry", response_model=list[TelemetryPointOut])
+def get_edge_device_telemetry(
+    device_id: int,
+    metric: str | None = None,
+    limit: int = 100,
+    from_ts: datetime | None = Query(default=None, alias="from"),
+    to_ts: datetime | None = Query(default=None, alias="to"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[TelemetryPointOut]:
+    _ensure_device_owned(db, user, device_id)
+    stmt = select(EdgeDeviceTelemetrySample).where(EdgeDeviceTelemetrySample.device_id == device_id)
+    if metric:
+        stmt = stmt.where(EdgeDeviceTelemetrySample.metric == metric)
+    if from_ts is not None:
+        stmt = stmt.where(EdgeDeviceTelemetrySample.ts >= from_ts)
+    if to_ts is not None:
+        stmt = stmt.where(EdgeDeviceTelemetrySample.ts <= to_ts)
+    stmt = stmt.order_by(EdgeDeviceTelemetrySample.ts.desc()).limit(min(limit, 5000))
+    rows = list(db.scalars(stmt).all())
+    rows.reverse()
+    return [_telemetry_point(r) for r in rows]
 
 
 @router.post("/edge-devices", response_model=EdgeDeviceOut, status_code=status.HTTP_201_CREATED)
@@ -165,7 +246,7 @@ def update_edge_device(
     body: EdgeDeviceUpdate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> EdgeDevice:
+) -> EdgeDeviceOut:
     device = _ensure_device_owned(db, user, device_id)
     if body.public_id is not None:
         device.public_id = body.public_id
@@ -188,8 +269,23 @@ def delete_edge_device(
     user: User = Depends(get_current_user),
 ) -> None:
     device = _ensure_device_owned(db, user, device_id)
-    db.delete(device)
-    db.commit()
+    try:
+        # ORM delete alone can try to NULL device_id on assignments (NOT NULL FK) → IntegrityError
+        db.execute(
+            delete(EdgeDeviceColonyAssignment).where(
+                EdgeDeviceColonyAssignment.device_id == device.id
+            )
+        )
+        db.execute(
+            delete(EdgeDeviceTelemetrySample).where(
+                EdgeDeviceTelemetrySample.device_id == device.id
+            )
+        )
+        db.delete(device)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "Cannot delete device")
 
 
 @router.put("/edge-devices/{device_id}/colony", response_model=EdgeDeviceOut)
@@ -198,7 +294,7 @@ def set_device_colony(
     body: SetColonyBody,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> EdgeDevice:
+) -> EdgeDeviceOut:
     device = _ensure_device_owned(db, user, device_id)
     _apply_colony_assignment(db, device, body.colony_id)
     db.add(device)
@@ -232,6 +328,7 @@ def ingest_telemetry(
     inserted = 0
     skipped = 0
     errors: list[str] = []
+    now = datetime.now(timezone.utc)
 
     for s in body.samples:
         device = db.scalars(
@@ -244,17 +341,30 @@ def ingest_telemetry(
             skipped += 1
             errors.append(f"unknown device {s.device_public_id}")
             continue
+
+        device.last_seen_at = now
+        db.add(device)
+        value = _normalize_value(s.value)
+
         if device.current_colony_id is None:
-            skipped += 1
-            errors.append(f"device {s.device_public_id} has no active colony")
+            db.add(
+                EdgeDeviceTelemetrySample(
+                    device_id=device.id,
+                    metric=s.metric,
+                    ts=s.ts,
+                    value=value,
+                )
+            )
+            inserted += 1
             continue
+
         db.add(
             TelemetrySample(
                 colony_id=device.current_colony_id,
                 source_device_id=device.id,
                 metric=s.metric,
                 ts=s.ts,
-                value=s.value if isinstance(s.value, (dict, list)) else {"v": s.value},
+                value=value,
             )
         )
         inserted += 1
@@ -272,7 +382,7 @@ def get_colony_telemetry(
     to_ts: datetime | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> list[TelemetrySample]:
+) -> list[TelemetryPointOut]:
     colony = db.get(Colony, colony_id)
     if colony is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Colony not found")
@@ -290,4 +400,4 @@ def get_colony_telemetry(
     stmt = stmt.order_by(TelemetrySample.ts.desc()).limit(min(limit, 5000))
     rows = list(db.scalars(stmt).all())
     rows.reverse()
-    return rows
+    return [_telemetry_point(r) for r in rows]

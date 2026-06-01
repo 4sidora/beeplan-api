@@ -55,3 +55,9 @@ class BuilderClient:
             )
             resp.raise_for_status()
             return resp.content
+
+    def get_releases(self) -> dict[str, str]:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(f"{self.base_url}/v1/releases")
+            resp.raise_for_status()
+            return resp.json()

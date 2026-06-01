@@ -1,0 +1,38 @@
+# Полный dev-стек: DB + builder + API с hot-reload исходников.
+# Запуск из beeplan-api:
+#   docker compose -f docker-compose.yml -f docker-compose.dev-stack.yml up -d
+# Или только API поверх уже запущенных db/builder:
+#   docker compose -f docker-compose.dev-stack.yml up -d api-dev
+
+services:
+  api-dev:
+    image: python:3.12-slim-bookworm
+    container_name: beeplan-api-dev
+    working_dir: /app
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://beeplan:beeplan@db:5432/beeplan
+      JWT_SECRET: dev-secret-change-in-production
+      BUILDER_URL: http://builder:9000
+      BUILDER_SECRET: dev-builder-secret
+      PUBLIC_API_BASE_URL: http://host.docker.internal:8000
+      FIRMWARE_BUILDS_PER_HOUR: 60
+      PYTHONPATH: /app
+    volumes:
+      - ./beeplan:/app/beeplan
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./requirements.txt:/app/requirements.txt
+    command:
+      - sh
+      - -c
+      - |
+        pip install -q -r requirements.txt httpx &&
+        alembic upgrade head &&
+        uvicorn beeplan.main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      db:
+        condition: service_healthy
+      builder:
+        condition: service_started

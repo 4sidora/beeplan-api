@@ -94,11 +94,13 @@ class ColonyUpdate(BaseModel):
 class ConcentratorOut(BaseModel):
     id: int
     apiary_id: int
+    apiary_name: str | None = None
     name: str
     ingest_token: str
     gateway_mac: str | None = None
     last_seen_at: datetime | None = None
     firmware_version: str | None = None
+    edge_device_count: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -112,6 +114,14 @@ class ConcentratorUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
 
 
+class TelemetryPointOut(BaseModel):
+    ts: datetime
+    metric: str
+    value: dict | list | str | float | int | bool | None
+
+    model_config = {"from_attributes": True}
+
+
 class EdgeDeviceOut(BaseModel):
     id: int
     concentrator_id: int
@@ -119,6 +129,8 @@ class EdgeDeviceOut(BaseModel):
     public_id: str
     label: str | None
     current_colony_id: int | None
+    last_seen_at: datetime | None = None
+    recent_unbound_telemetry: list[TelemetryPointOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -138,14 +150,6 @@ class TelemetryBatchOut(BaseModel):
     inserted: int
     skipped: int
     errors: list[str] = []
-
-
-class TelemetryPointOut(BaseModel):
-    ts: datetime
-    metric: str
-    value: dict | list | str | float | int | bool | None
-
-    model_config = {"from_attributes": True}
 
 
 class EdgeDeviceCreate(BaseModel):
@@ -176,7 +180,7 @@ class ConcentratorHeartbeatOut(BaseModel):
 
 class FirmwareBuildCreate(BaseModel):
     device_type: str = Field(pattern="^(gateway|edge)$")
-    board: str = Field(default="esp32dev", max_length=32)
+    board: str = Field(default="esp32dev", pattern="^(esp32dev|esp32c3|esp32c3-usb)$")
     concentrator_id: int
     edge_device_id: int | None = None
     wifi_ssid: str | None = Field(default=None, max_length=64)
@@ -194,8 +198,18 @@ class FirmwareBuildOut(BaseModel):
     status: str
     error: str | None = None
     manifest_url: str | None = None
+    firmware_version: str | None = None
+    serial_tag: str | None = None
     expires_at: datetime
     created_at: datetime
     finished_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class FirmwareReleaseOut(BaseModel):
+    firmware_version: str
+    gateway_version: str
+    edge_version: str
+    gateway_serial_tag: str
+    edge_serial_tag: str

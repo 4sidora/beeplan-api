@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from beeplan.database import get_db
 from beeplan.deps import get_current_user
-from beeplan.models import Apiary, BeeBreed, Colony, Concentrator, User
+from beeplan.models import Apiary, BeeBreed, Colony, Concentrator, EdgeDevice, User
 from beeplan.colony_catalog import apply_colony_payload, validate_colony_fields
 from beeplan.colony_names import generate_colony_name
 from beeplan.schemas import (
@@ -204,14 +204,47 @@ def delete_colony(
     db.commit()
 
 
+def _to_concentrator_out(conc: Concentrator, db: Session) -> ConcentratorOut:
+    apiary = db.get(Apiary, conc.apiary_id)
+    device_count = db.scalar(
+        select(func.count())
+        .select_from(EdgeDevice)
+        .where(EdgeDevice.concentrator_id == conc.id)
+    )
+    return ConcentratorOut(
+        id=conc.id,
+        apiary_id=conc.apiary_id,
+        apiary_name=apiary.name if apiary else None,
+        name=conc.name,
+        ingest_token=conc.ingest_token,
+        gateway_mac=conc.gateway_mac,
+        last_seen_at=conc.last_seen_at,
+        firmware_version=conc.firmware_version,
+        edge_device_count=int(device_count or 0),
+    )
+
+
 @router.get("/concentrators", response_model=list[ConcentratorOut])
 def list_concentrators(
-    apiary_id: int,
+    apiary_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> list[Concentrator]:
-    _ensure_apiary_owned(db, user, apiary_id)
-    return list(db.scalars(select(Concentrator).where(Concentrator.apiary_id == apiary_id)).all())
+) -> list[ConcentratorOut]:
+    if apiary_id is not None:
+        _ensure_apiary_owned(db, user, apiary_id)
+        rows = list(
+            db.scalars(select(Concentrator).where(Concentrator.apiary_id == apiary_id)).all()
+        )
+    else:
+        apiary_ids = list(
+            db.scalars(select(Apiary.id).where(Apiary.user_id == user.id)).all()
+        )
+        if not apiary_ids:
+            return []
+        rows = list(
+            db.scalars(select(Concentrator).where(Concentrator.apiary_id.in_(apiary_ids))).all()
+        )
+    return [_to_concentrator_out(c, db) for c in rows]
 
 
 @router.post("/concentrators", response_model=ConcentratorOut, status_code=status.HTTP_201_CREATED)
@@ -229,7 +262,7 @@ def create_concentrator(
     db.add(conc)
     db.commit()
     db.refresh(conc)
-    return conc
+    return _to_concentrator_out(conc, db)
 
 
 @router.get("/concentrators/{concentrator_id}", response_model=ConcentratorOut)
@@ -237,8 +270,9 @@ def get_concentrator(
     concentrator_id: int,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> Concentrator:
-    return _ensure_concentrator_owned(db, user, concentrator_id)
+) -> ConcentratorOut:
+    conc = _ensure_concentrator_owned(db, user, concentrator_id)
+    return _to_concentrator_out(conc, db)
 
 
 @router.patch("/concentrators/{concentrator_id}", response_model=ConcentratorOut)
@@ -253,7 +287,7 @@ def update_concentrator(
     db.add(conc)
     db.commit()
     db.refresh(conc)
-    return conc
+    return _to_concentrator_out(conc, db)
 
 
 @router.delete("/concentrators/{concentrator_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -263,5 +297,12 @@ def delete_concentrator(
     user: User = Depends(get_current_user),
 ) -> None:
     conc = _ensure_concentrator_owned(db, user, concentrator_id)
-    db.delete(conc)
-    db.commit()
+    try:
+        db.delete(conc)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Cannot delete concentrator: remove linked data first",
+        )

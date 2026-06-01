@@ -94,13 +94,34 @@ class EdgeDevice(Base):
     label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     hardware_mac: Mapped[str | None] = mapped_column(String(17), nullable=True)
     current_colony_id: Mapped[int | None] = mapped_column(ForeignKey("colonies.id", ondelete="SET NULL"), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 
     concentrator: Mapped[Concentrator] = relationship(back_populates="edge_devices")
     current_colony: Mapped[Colony | None] = relationship(foreign_keys="EdgeDevice.current_colony_id")
     assignments: Mapped[list[EdgeDeviceColonyAssignment]] = relationship(
-        back_populates="device", foreign_keys="EdgeDeviceColonyAssignment.device_id"
+        back_populates="device",
+        foreign_keys="EdgeDeviceColonyAssignment.device_id",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
+    unbound_telemetry: Mapped[list[EdgeDeviceTelemetrySample]] = relationship(
+        back_populates="device", passive_deletes=True
+    )
+
+
+class EdgeDeviceTelemetrySample(Base):
+    """Телеметрия устройства без привязки к семье (current_colony_id был NULL)."""
+
+    __tablename__ = "edge_device_telemetry_samples"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("edge_devices.id", ondelete="CASCADE"))
+    metric: Mapped[str] = mapped_column(String(64), nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    value: Mapped[dict | list | str | float | int | bool | None] = mapped_column(JSON, nullable=False)
+
+    device: Mapped[EdgeDevice] = relationship(back_populates="unbound_telemetry")
 
 
 class EdgeDeviceColonyAssignment(Base):

@@ -10,6 +10,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
@@ -20,8 +21,17 @@ from beeplan.builder_client import BuilderClient
 from beeplan.config import get_settings
 from beeplan.database import SessionLocal, get_db
 from beeplan.deps import get_current_user, get_current_user_optional
+from beeplan.firmware_catalog import (
+    EDGE_SERIAL_TAG,
+    EDGE_VERSION,
+    FIRMWARE_VERSION,
+    GATEWAY_SERIAL_TAG,
+    GATEWAY_VERSION,
+    serial_tag,
+    version_for,
+)
 from beeplan.models import Apiary, Concentrator, EdgeDevice, FirmwareBuild, User
-from beeplan.schemas import FirmwareBuildCreate, FirmwareBuildOut
+from beeplan.schemas import FirmwareBuildCreate, FirmwareBuildOut, FirmwareReleaseOut
 
 router = APIRouter(prefix="/v1/firmware", tags=["firmware"])
 
@@ -60,19 +70,88 @@ def _ensure_edge_owned(db: Session, user: User, edge_device_id: int) -> EdgeDevi
 def _check_rate_limit(db: Session, user_id: int) -> None:
     settings = get_settings()
     since = datetime.now(timezone.utc) - timedelta(hours=1)
+    limit = settings.firmware_builds_per_hour
+    # Failed builds (builder down, compile error) should not block retries.
     count = db.scalar(
         select(func.count())
         .select_from(FirmwareBuild)
-        .where(FirmwareBuild.user_id == user_id, FirmwareBuild.created_at >= since)
+        .where(
+            FirmwareBuild.user_id == user_id,
+            FirmwareBuild.created_at >= since,
+            FirmwareBuild.status != "failed",
+        )
     )
-    if count is not None and count >= settings.firmware_builds_per_hour:
-        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Firmware build rate limit exceeded")
+    if count is not None and count >= limit:
+        oldest = db.scalar(
+            select(func.min(FirmwareBuild.created_at)).where(
+                FirmwareBuild.user_id == user_id,
+                FirmwareBuild.created_at >= since,
+                FirmwareBuild.status != "failed",
+            )
+        )
+        retry_min = 60
+        if oldest is not None:
+            retry_at = oldest + timedelta(hours=1)
+            delta = retry_at - datetime.now(timezone.utc)
+            retry_min = max(1, int(delta.total_seconds() // 60) + 1)
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            f"Лимит сборок прошивки: {count}/{limit} за час. "
+            f"Повторите через ~{retry_min} мин или увеличьте FIRMWARE_BUILDS_PER_HOUR в .env API.",
+        )
+
+
+def _friendly_builder_error(exc: Exception) -> str:
+    msg = str(exc)
+    if "No address associated with hostname" in msg or "Errno -5" in msg or "getaddrinfo failed" in msg:
+        settings = get_settings()
+        return (
+            f"Не удалось подключиться к серверу сборки ({settings.builder_url}). "
+            "Если API запущен на ПК (не в Docker), укажите в .env: "
+            "BUILDER_URL=http://localhost:9000. Если API в Docker — BUILDER_URL=http://builder:9000 "
+            "и контейнер beeplan-builder должен быть запущен."
+        )
+    return msg
+
+
+def _manifest_base_url(request: Request) -> str:
+    """URL для manifest.json — должен открываться из браузера на ПК пользователя."""
+    settings = get_settings()
+    configured = settings.public_api_base_url.strip().rstrip("/")
+    if configured:
+        try:
+            host = (urlparse(configured).hostname or "").lower()
+        except ValueError:
+            host = ""
+        if host not in ("localhost", "127.0.0.1", "host.docker.internal", ""):
+            return configured
+    return str(request.base_url).rstrip("/")
+
+
+def _resolve_firmware_releases() -> FirmwareReleaseOut:
+    try:
+        data = BuilderClient().get_releases()
+        return FirmwareReleaseOut(
+            firmware_version=data.get("firmware_version", FIRMWARE_VERSION),
+            gateway_version=data.get("gateway_version", GATEWAY_VERSION),
+            edge_version=data.get("edge_version", EDGE_VERSION),
+            gateway_serial_tag=data.get("gateway_serial_tag", GATEWAY_SERIAL_TAG),
+            edge_serial_tag=data.get("edge_serial_tag", EDGE_SERIAL_TAG),
+        )
+    except Exception:  # noqa: BLE001
+        return FirmwareReleaseOut(
+            firmware_version=FIRMWARE_VERSION,
+            gateway_version=GATEWAY_VERSION,
+            edge_version=EDGE_VERSION,
+            gateway_serial_tag=GATEWAY_SERIAL_TAG,
+            edge_serial_tag=EDGE_SERIAL_TAG,
+        )
 
 
 def _to_out(row: FirmwareBuild, request: Request) -> FirmwareBuildOut:
     manifest_url = None
     if row.status == "ready":
-        base = str(request.base_url).rstrip("/")
+        base = _manifest_base_url(request)
         token = _download_token(row.id)
         manifest_url = f"{base}/v1/firmware/builds/{row.id}/manifest.json?token={token}"
     return FirmwareBuildOut(
@@ -84,6 +163,8 @@ def _to_out(row: FirmwareBuild, request: Request) -> FirmwareBuildOut:
         status=row.status,
         error=row.error,
         manifest_url=manifest_url,
+        firmware_version=version_for(row.device_type),
+        serial_tag=serial_tag(row.device_type),
         expires_at=row.expires_at,
         created_at=row.created_at,
         finished_at=row.finished_at,
@@ -123,11 +204,19 @@ def _poll_builder(build_id: str) -> None:
         row = db.get(FirmwareBuild, build_id)
         if row is not None:
             row.status = "failed"
-            row.error = str(exc)
+            row.error = _friendly_builder_error(exc)
             row.finished_at = datetime.now(timezone.utc)
             db.commit()
     finally:
         db.close()
+
+
+@router.get("/releases", response_model=FirmwareReleaseOut)
+def get_firmware_releases(
+    _user: User = Depends(get_current_user),
+) -> FirmwareReleaseOut:
+    """Актуальная версия прошивки на сервере сборки (для мастера прошивки)."""
+    return _resolve_firmware_releases()
 
 
 @router.post("/builds", response_model=FirmwareBuildOut, status_code=status.HTTP_202_ACCEPTED)
@@ -159,7 +248,8 @@ def create_firmware_build(
             "wifi_password": body.wifi_password,
             "api_base_url": api_url,
             "ingest_token": conc.ingest_token,
-            "firmware_version": "0.1.0",
+            "firmware_version": version_for(body.device_type),
+            "firmware_serial_tag": serial_tag(body.device_type),
         }
         edge_device_id = None
     else:
@@ -178,6 +268,8 @@ def create_firmware_build(
             "gateway_mac": conc.gateway_mac,
             "device_public_id": device.public_id,
             "wake_interval_sec": body.wake_interval_sec,
+            "firmware_version": version_for("edge"),
+            "firmware_serial_tag": serial_tag("edge"),
         }
 
     row = FirmwareBuild(
@@ -201,7 +293,7 @@ def create_firmware_build(
         db.commit()
     except Exception as exc:  # noqa: BLE001
         row.status = "failed"
-        row.error = str(exc)
+        row.error = _friendly_builder_error(exc)
         row.finished_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(row)

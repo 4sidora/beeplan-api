@@ -40,6 +40,7 @@ services:
       BUILDER_URL: http://builder:9000
       BUILDER_SECRET: dev-builder-secret
       PUBLIC_API_BASE_URL: http://host.docker.internal:8000
+      FIRMWARE_BUILDS_PER_HOUR: 60
     depends_on:
       db:
         condition: service_healthy
