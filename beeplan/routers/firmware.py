@@ -185,6 +185,11 @@ def _poll_builder(build_id: str) -> None:
                 row.status = "ready"
                 row.finished_at = datetime.now(timezone.utc)
                 row.error = None
+                if row.edge_device_id is not None and row.device_type == "edge":
+                    device = db.get(EdgeDevice, row.edge_device_id)
+                    if device is not None:
+                        device.firmware_version = version_for("edge")
+                        db.add(device)
                 db.commit()
                 return
             if remote_status == "failed":

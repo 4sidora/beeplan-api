@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -34,6 +35,27 @@ from beeplan.schemas import (
 router = APIRouter(prefix="/v1", tags=["devices"])
 
 _UNBOUND_TELEMETRY_PREVIEW = 8
+_PUBLIC_ID_RETRIES = 5
+
+
+_EDGE_TYPE_LABELS: dict[str, str] = {
+    "multisensor": "Мультидатчик",
+    "scales": "Весы",
+}
+
+
+def _generate_public_id() -> str:
+    return f"edge-{uuid.uuid4().hex[:8]}"
+
+
+def _public_id_suffix(public_id: str) -> str:
+    prefix = "edge-"
+    return public_id[len(prefix) :] if public_id.startswith(prefix) else public_id
+
+
+def _default_edge_name(public_id: str, device_type: str = "multisensor") -> str:
+    type_label = _EDGE_TYPE_LABELS.get(device_type, "Мультидатчик")
+    return f"{type_label} {_public_id_suffix(public_id)}"
 
 
 def _normalize_mac(mac: str) -> str:
@@ -48,17 +70,64 @@ def _telemetry_point(row: EdgeDeviceTelemetrySample | TelemetrySample) -> Teleme
     return TelemetryPointOut(ts=row.ts, metric=row.metric, value=row.value)
 
 
-def _recent_unbound_telemetry(db: Session, device_id: int) -> list[TelemetryPointOut]:
-    rows = list(
-        db.scalars(
-            select(EdgeDeviceTelemetrySample)
-            .where(EdgeDeviceTelemetrySample.device_id == device_id)
-            .order_by(EdgeDeviceTelemetrySample.ts.desc())
-            .limit(_UNBOUND_TELEMETRY_PREVIEW)
-        ).all()
-    )
+def _recent_device_telemetry(db: Session, device: EdgeDevice) -> list[TelemetryPointOut]:
+    if device.current_colony_id is None:
+        rows = list(
+            db.scalars(
+                select(EdgeDeviceTelemetrySample)
+                .where(EdgeDeviceTelemetrySample.device_id == device.id)
+                .order_by(EdgeDeviceTelemetrySample.ts.desc())
+                .limit(_UNBOUND_TELEMETRY_PREVIEW)
+            ).all()
+        )
+    else:
+        rows = list(
+            db.scalars(
+                select(TelemetrySample)
+                .where(TelemetrySample.source_device_id == device.id)
+                .order_by(TelemetrySample.ts.desc())
+                .limit(_UNBOUND_TELEMETRY_PREVIEW)
+            ).all()
+        )
     rows.reverse()
     return [_telemetry_point(r) for r in rows]
+
+
+def _fetch_device_telemetry(
+    db: Session,
+    device_id: int,
+    *,
+    metric: str | None = None,
+    from_ts: datetime | None = None,
+    to_ts: datetime | None = None,
+    limit: int,
+) -> list[TelemetryPointOut]:
+    cap = min(limit, 5000)
+
+    unbound_stmt = select(EdgeDeviceTelemetrySample).where(
+        EdgeDeviceTelemetrySample.device_id == device_id
+    )
+    if metric:
+        unbound_stmt = unbound_stmt.where(EdgeDeviceTelemetrySample.metric == metric)
+    if from_ts is not None:
+        unbound_stmt = unbound_stmt.where(EdgeDeviceTelemetrySample.ts >= from_ts)
+    if to_ts is not None:
+        unbound_stmt = unbound_stmt.where(EdgeDeviceTelemetrySample.ts <= to_ts)
+
+    colony_stmt = select(TelemetrySample).where(TelemetrySample.source_device_id == device_id)
+    if metric:
+        colony_stmt = colony_stmt.where(TelemetrySample.metric == metric)
+    if from_ts is not None:
+        colony_stmt = colony_stmt.where(TelemetrySample.ts >= from_ts)
+    if to_ts is not None:
+        colony_stmt = colony_stmt.where(TelemetrySample.ts <= to_ts)
+
+    merged: list[EdgeDeviceTelemetrySample | TelemetrySample] = list(db.scalars(unbound_stmt).all())
+    merged.extend(db.scalars(colony_stmt).all())
+    merged.sort(key=lambda r: r.ts, reverse=True)
+    merged = merged[:cap]
+    merged.reverse()
+    return [_telemetry_point(r) for r in merged]
 
 
 def _device_out(device: EdgeDevice, db: Session) -> EdgeDeviceOut:
@@ -68,10 +137,11 @@ def _device_out(device: EdgeDevice, db: Session) -> EdgeDeviceOut:
         concentrator_id=device.concentrator_id,
         concentrator_name=conc.name if conc else None,
         public_id=device.public_id,
-        label=device.label,
+        name=device.name,
         current_colony_id=device.current_colony_id,
         last_seen_at=device.last_seen_at,
-        recent_unbound_telemetry=_recent_unbound_telemetry(db, device.id),
+        firmware_version=device.firmware_version,
+        recent_telemetry=_recent_device_telemetry(db, device),
     )
 
 
@@ -199,17 +269,14 @@ def get_edge_device_telemetry(
     user: User = Depends(get_current_user),
 ) -> list[TelemetryPointOut]:
     _ensure_device_owned(db, user, device_id)
-    stmt = select(EdgeDeviceTelemetrySample).where(EdgeDeviceTelemetrySample.device_id == device_id)
-    if metric:
-        stmt = stmt.where(EdgeDeviceTelemetrySample.metric == metric)
-    if from_ts is not None:
-        stmt = stmt.where(EdgeDeviceTelemetrySample.ts >= from_ts)
-    if to_ts is not None:
-        stmt = stmt.where(EdgeDeviceTelemetrySample.ts <= to_ts)
-    stmt = stmt.order_by(EdgeDeviceTelemetrySample.ts.desc()).limit(min(limit, 5000))
-    rows = list(db.scalars(stmt).all())
-    rows.reverse()
-    return [_telemetry_point(r) for r in rows]
+    return _fetch_device_telemetry(
+        db,
+        device_id,
+        metric=metric,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        limit=limit,
+    )
 
 
 @router.post("/edge-devices", response_model=EdgeDeviceOut, status_code=status.HTTP_201_CREATED)
@@ -219,17 +286,27 @@ def create_edge_device(
     user: User = Depends(get_current_user),
 ) -> EdgeDeviceOut:
     _ensure_concentrator_owned(db, user, body.concentrator_id)
-    device = EdgeDevice(
-        concentrator_id=body.concentrator_id,
-        public_id=body.public_id,
-        label=body.label,
-    )
-    db.add(device)
-    try:
-        db.flush()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "Device public_id already exists")
+    raw_name = (body.name or "").strip()
+
+    device: EdgeDevice | None = None
+    for _ in range(_PUBLIC_ID_RETRIES):
+        public_id = _generate_public_id()
+        device_name = raw_name or _default_edge_name(public_id)
+        candidate = EdgeDevice(
+            concentrator_id=body.concentrator_id,
+            public_id=public_id,
+            name=device_name,
+        )
+        db.add(candidate)
+        try:
+            db.flush()
+            device = candidate
+            break
+        except IntegrityError:
+            db.rollback()
+            device = None
+    if device is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Could not allocate device public_id")
 
     if body.colony_id is not None:
         _apply_colony_assignment(db, device, body.colony_id)
@@ -248,16 +325,10 @@ def update_edge_device(
     user: User = Depends(get_current_user),
 ) -> EdgeDeviceOut:
     device = _ensure_device_owned(db, user, device_id)
-    if body.public_id is not None:
-        device.public_id = body.public_id
-    if body.label is not None:
-        device.label = body.label
+    if body.name is not None:
+        device.name = body.name.strip() or device.name
     db.add(device)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "Device public_id already exists")
+    db.commit()
     db.refresh(device)
     return _device_out(device, db)
 
@@ -329,6 +400,8 @@ def ingest_telemetry(
     skipped = 0
     errors: list[str] = []
     now = datetime.now(timezone.utc)
+    concentrator.last_seen_at = now
+    db.add(concentrator)
 
     for s in body.samples:
         device = db.scalars(

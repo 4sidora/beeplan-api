@@ -28,18 +28,18 @@ from beeplan.models import (
 from beeplan.seed_dev import DEV_EMAIL
 
 APIARY_NAME = "Демо-пасека"
-CONCENTRATOR_NAME = "Демо-концентратор"
+CONCENTRATOR_NAME = "Базовая станция Бердск"
 
 _rng = random.Random(42)
 DEMO_COLONY_NAMES = [generate_colony_name(_rng) for _ in range(5)]
 
-# name, public_id, label, breed, colony_type, hive_type, body_count, frames, volume
+# name, public_id, edge_name, breed, colony_type, hive_type, body_count, frames, volume
 COLONIES = [
-    (DEMO_COLONY_NAMES[0], "dev-edge-1", "Улей 1 (южный ряд)", "Карникола", "colony", "dadant", 2, 10, None),
-    (DEMO_COLONY_NAMES[1], "dev-edge-2", "Улей 2", "Бакфаст", "colony", "magazin", 1, 8, None),
-    (DEMO_COLONY_NAMES[2], "dev-edge-3", "Улей 3", "Среднерусская", "nucleus", "ruta", None, 10, None),
-    (DEMO_COLONY_NAMES[3], "dev-edge-4", "Улей 4", "Карпатская", "split", "dadant_laying", 1, 20, None),
-    (DEMO_COLONY_NAMES[4], "dev-edge-5", "Улей 5 (северный ряд)", "Местная", "colony", "koloda", None, None, 0.35),
+    (DEMO_COLONY_NAMES[0], "dev-edge-1", "Мультидатчик dev-edge-1", "Карникола", "colony", "dadant", 2, 10, None),
+    (DEMO_COLONY_NAMES[1], "dev-edge-2", "Мультидатчик dev-edge-2", "Бакфаст", "colony", "magazin", 1, 8, None),
+    (DEMO_COLONY_NAMES[2], "dev-edge-3", "Мультидатчик dev-edge-3", "Среднерусская", "nucleus", "ruta", None, 10, None),
+    (DEMO_COLONY_NAMES[3], "dev-edge-4", "Мультидатчик dev-edge-4", "Карпатская", "split", "dadant_laying", 1, 20, None),
+    (DEMO_COLONY_NAMES[4], "dev-edge-5", "Мультидатчик dev-edge-5", "Местная", "colony", "koloda", None, None, 0.35),
 ]
 
 INTERVAL_MINUTES = 30
@@ -78,7 +78,7 @@ def _ensure_colony_and_device(
     conc: Concentrator,
     colony_name: str,
     public_id: str,
-    label: str,
+    edge_name: str,
     bee_breed: str | None = None,
     colony_type: str | None = None,
     hive_type: str | None = None,
@@ -120,7 +120,7 @@ def _ensure_colony_and_device(
         device = EdgeDevice(
             concentrator_id=conc.id,
             public_id=public_id,
-            label=label,
+            name=edge_name,
             current_colony_id=colony.id,
         )
         db.add(device)
@@ -128,7 +128,7 @@ def _ensure_colony_and_device(
         db.add(EdgeDeviceColonyAssignment(device_id=device.id, colony_id=colony.id))
     else:
         device.current_colony_id = colony.id
-        device.label = label
+        device.name = edge_name
         db.add(device)
 
     return colony, device
@@ -260,7 +260,7 @@ def main() -> None:
             "dev-edge-5": ["Семья №5 (северный ряд)", "Семья №5"],
         }
         for idx, row in enumerate(COLONIES):
-            cname, pid, label, breed, ctype, htype, bodies, frames, vol = row
+            cname, pid, edge_name, breed, ctype, htype, bodies, frames, vol = row
             legacy = legacy_by_device.get(pid, [])
             colony, device = _ensure_colony_and_device(
                 db,
@@ -268,7 +268,7 @@ def main() -> None:
                 conc,
                 cname,
                 pid,
-                label,
+                edge_name,
                 breed,
                 ctype,
                 htype,
@@ -350,7 +350,7 @@ def main() -> None:
 def _print_summary(apiary: Apiary, pairs: list[tuple[Colony, EdgeDevice]], conc: Concentrator) -> None:
     print("  Семьи и устройства:")
     for colony, device in pairs:
-        print(f"    - {colony.name} ← {device.public_id} ({device.label})")
+        print(f"    - {colony.name} ← {device.public_id} ({device.name})")
     print("  В веб-интерфейсе: откройте карточку семьи — параметры, устройства и графики.")
 
 

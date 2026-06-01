@@ -11,6 +11,7 @@ from beeplan.database import get_db
 from beeplan.deps import get_current_user
 from beeplan.models import Apiary, BeeBreed, Colony, Concentrator, EdgeDevice, User
 from beeplan.colony_catalog import apply_colony_payload, validate_colony_fields
+from beeplan.base_station_names import generate_base_station_name
 from beeplan.colony_names import generate_colony_name
 from beeplan.schemas import (
     ApiaryCreate,
@@ -254,9 +255,10 @@ def create_concentrator(
     user: User = Depends(get_current_user),
 ) -> Concentrator:
     _ensure_apiary_owned(db, user, body.apiary_id)
+    raw_name = (body.name or "").strip()
     conc = Concentrator(
         apiary_id=body.apiary_id,
-        name=body.name,
+        name=raw_name or generate_base_station_name(),
         ingest_token=str(uuid.uuid4()),
     )
     db.add(conc)

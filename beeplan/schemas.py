@@ -107,7 +107,7 @@ class ConcentratorOut(BaseModel):
 
 class ConcentratorCreate(BaseModel):
     apiary_id: int
-    name: str = Field(min_length=1, max_length=255)
+    name: str | None = Field(default=None, max_length=255)
 
 
 class ConcentratorUpdate(BaseModel):
@@ -127,10 +127,11 @@ class EdgeDeviceOut(BaseModel):
     concentrator_id: int
     concentrator_name: str | None = None
     public_id: str
-    label: str | None
+    name: str | None
     current_colony_id: int | None
     last_seen_at: datetime | None = None
-    recent_unbound_telemetry: list[TelemetryPointOut] = Field(default_factory=list)
+    firmware_version: str | None = None
+    recent_telemetry: list[TelemetryPointOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -154,14 +155,12 @@ class TelemetryBatchOut(BaseModel):
 
 class EdgeDeviceCreate(BaseModel):
     concentrator_id: int
-    public_id: str = Field(min_length=1, max_length=64)
-    label: str | None = Field(default=None, max_length=255)
+    name: str | None = Field(default=None, max_length=255)
     colony_id: int | None = None
 
 
 class EdgeDeviceUpdate(BaseModel):
-    public_id: str | None = Field(default=None, min_length=1, max_length=64)
-    label: str | None = Field(default=None, max_length=255)
+    name: str | None = Field(default=None, max_length=255)
 
 
 class SetColonyBody(BaseModel):

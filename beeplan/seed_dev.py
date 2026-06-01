@@ -46,7 +46,7 @@ def main() -> None:
         db.flush()
 
         token = str(uuid.uuid4())
-        conc = Concentrator(apiary_id=apiary.id, name="Демо-концентратор", ingest_token=token)
+        conc = Concentrator(apiary_id=apiary.id, name="Базовая станция Бердск", ingest_token=token)
         db.add(conc)
         db.flush()
 
@@ -61,7 +61,7 @@ def main() -> None:
         device = EdgeDevice(
             concentrator_id=conc.id,
             public_id="dev-edge-1",
-            label="Улей демо",
+            name="Мультидатчик dev-edge-1",
             current_colony_id=colony.id,
         )
         db.add(device)
