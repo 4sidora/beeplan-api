@@ -4,12 +4,19 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from beeplan.database import get_db
 from beeplan.deps import get_current_user, require_concentrator
+from beeplan.soft_delete import (
+    concentrator_active,
+    edge_active,
+    require_active_concentrator,
+    require_active_edge,
+    soft_delete_edge,
+)
 from beeplan.models import (
     Apiary,
     Colony,
@@ -132,10 +139,11 @@ def _fetch_device_telemetry(
 
 def _device_out(device: EdgeDevice, db: Session) -> EdgeDeviceOut:
     conc = db.get(Concentrator, device.concentrator_id)
+    conc_name = conc.name if conc and conc.deleted_at is None else None
     return EdgeDeviceOut(
         id=device.id,
         concentrator_id=device.concentrator_id,
-        concentrator_name=conc.name if conc else None,
+        concentrator_name=conc_name,
         public_id=device.public_id,
         name=device.name,
         current_colony_id=device.current_colony_id,
@@ -147,11 +155,9 @@ def _device_out(device: EdgeDevice, db: Session) -> EdgeDeviceOut:
 
 def _ensure_device_owned(db: Session, user: User, device_id: int) -> EdgeDevice:
     device = db.get(EdgeDevice, device_id)
-    if device is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Device not found")
+    require_active_edge(device)
     conc = db.get(Concentrator, device.concentrator_id)
-    if conc is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Concentrator not found")
+    require_active_concentrator(conc)
     apiary = db.get(Apiary, conc.apiary_id)
     if apiary is None or apiary.user_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Forbidden")
@@ -160,8 +166,7 @@ def _ensure_device_owned(db: Session, user: User, device_id: int) -> EdgeDevice:
 
 def _ensure_concentrator_owned(db: Session, user: User, concentrator_id: int) -> Concentrator:
     conc = db.get(Concentrator, concentrator_id)
-    if conc is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Concentrator not found")
+    require_active_concentrator(conc)
     apiary = db.get(Apiary, conc.apiary_id)
     if apiary is None or apiary.user_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Forbidden")
@@ -219,7 +224,12 @@ def list_edge_devices(
     if concentrator_id is not None:
         _ensure_concentrator_owned(db, user, concentrator_id)
         devices = list(
-            db.scalars(select(EdgeDevice).where(EdgeDevice.concentrator_id == concentrator_id)).all()
+            db.scalars(
+                select(EdgeDevice).where(
+                    EdgeDevice.concentrator_id == concentrator_id,
+                    edge_active(),
+                )
+            ).all()
         )
         return [_device_out(d, db) for d in devices]
 
@@ -228,7 +238,12 @@ def list_edge_devices(
         if apiary is None or apiary.user_id != user.id:
             return []
         conc_ids = list(
-            db.scalars(select(Concentrator.id).where(Concentrator.apiary_id == apiary_id)).all()
+            db.scalars(
+                select(Concentrator.id).where(
+                    Concentrator.apiary_id == apiary_id,
+                    concentrator_active(),
+                )
+            ).all()
         )
     else:
         apiary_ids = list(
@@ -237,13 +252,23 @@ def list_edge_devices(
         if not apiary_ids:
             return []
         conc_ids = list(
-            db.scalars(select(Concentrator.id).where(Concentrator.apiary_id.in_(apiary_ids))).all()
+            db.scalars(
+                select(Concentrator.id).where(
+                    Concentrator.apiary_id.in_(apiary_ids),
+                    concentrator_active(),
+                )
+            ).all()
         )
 
     if not conc_ids:
         return []
     devices = list(
-        db.scalars(select(EdgeDevice).where(EdgeDevice.concentrator_id.in_(conc_ids))).all()
+        db.scalars(
+            select(EdgeDevice).where(
+                EdgeDevice.concentrator_id.in_(conc_ids),
+                edge_active(),
+            )
+        ).all()
     )
     return [_device_out(d, db) for d in devices]
 
@@ -340,23 +365,8 @@ def delete_edge_device(
     user: User = Depends(get_current_user),
 ) -> None:
     device = _ensure_device_owned(db, user, device_id)
-    try:
-        # ORM delete alone can try to NULL device_id on assignments (NOT NULL FK) → IntegrityError
-        db.execute(
-            delete(EdgeDeviceColonyAssignment).where(
-                EdgeDeviceColonyAssignment.device_id == device.id
-            )
-        )
-        db.execute(
-            delete(EdgeDeviceTelemetrySample).where(
-                EdgeDeviceTelemetrySample.device_id == device.id
-            )
-        )
-        db.delete(device)
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "Cannot delete device")
+    soft_delete_edge(db, device)
+    db.commit()
 
 
 @router.put("/edge-devices/{device_id}/colony", response_model=EdgeDeviceOut)
@@ -408,6 +418,7 @@ def ingest_telemetry(
             select(EdgeDevice).where(
                 EdgeDevice.concentrator_id == concentrator.id,
                 EdgeDevice.public_id == s.device_public_id,
+                edge_active(),
             )
         ).first()
         if device is None:

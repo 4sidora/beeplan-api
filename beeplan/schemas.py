@@ -68,6 +68,10 @@ class ColonyNameOut(BaseModel):
     name: str
 
 
+class ConcentratorNameOut(BaseModel):
+    name: str
+
+
 class ColonyCreate(BaseModel):
     apiary_id: int
     name: str = Field(min_length=1, max_length=255)
@@ -202,6 +206,10 @@ class FirmwareBuildOut(BaseModel):
     expires_at: datetime
     created_at: datetime
     finished_at: datetime | None = None
+    phase: str | None = None
+    log_tail: list[str] | None = None
+    progress_pct: int | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

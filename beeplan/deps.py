@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from beeplan.database import get_db
 from beeplan.models import Concentrator, User
+from beeplan.soft_delete import concentrator_active, require_active_concentrator
 from beeplan.security import safe_decode_token
 
 security = HTTPBearer(auto_error=False)
@@ -20,7 +21,11 @@ def get_concentrator_from_ingest_token(
 ) -> Concentrator | None:
     if not token:
         return None
-    row = db.query(Concentrator).filter(Concentrator.ingest_token == token).one_or_none()
+    row = (
+        db.query(Concentrator)
+        .filter(Concentrator.ingest_token == token, concentrator_active())
+        .one_or_none()
+    )
     if row is None:
         return None
     if not secrets.compare_digest(row.ingest_token, token):
@@ -38,7 +43,7 @@ def require_concentrator(
     conc = get_concentrator_from_ingest_token(db, token)
     if conc is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid concentrator token")
-    return conc
+    return require_active_concentrator(conc)
 
 
 def get_current_user(

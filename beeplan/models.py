@@ -48,6 +48,7 @@ class Concentrator(Base):
     gateway_mac: Mapped[str | None] = mapped_column(String(17), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     firmware_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 
     apiary: Mapped[Apiary] = relationship(back_populates="concentrators")
@@ -96,6 +97,7 @@ class EdgeDevice(Base):
     firmware_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     current_colony_id: Mapped[int | None] = mapped_column(ForeignKey("colonies.id", ondelete="SET NULL"), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 
     concentrator: Mapped[Concentrator] = relationship(back_populates="edge_devices")

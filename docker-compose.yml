@@ -21,14 +21,16 @@ services:
       dockerfile: beeplan-builder/Dockerfile
     ports:
       - "9000:9000"
-    environment:
-      BEEPLAN_BUILDER_SECRET: dev-builder-secret
     volumes:
       - firmware_artifacts:/artifacts
+      - firmware_workdir:/workdir
       # Dev: pick up firmware source changes without rebuilding the image
       - ../beeplan-gateway:/firmware/gateway
       - ../beeplan-edge:/firmware/edge
       - ../beeplan-builder/builder:/app/builder
+    environment:
+      BEEPLAN_BUILDER_SECRET: dev-builder-secret
+      BEEPLAN_WORKDIR: /workdir
 
   api:
     build: .
@@ -50,3 +52,4 @@ services:
 volumes:
   beeplan_pg:
   firmware_artifacts:
+  firmware_workdir:

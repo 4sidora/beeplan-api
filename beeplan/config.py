@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     builder_url: str = "http://localhost:9000"
     builder_secret: str = "dev-builder-secret"
     firmware_build_ttl_minutes: int = 60
-    firmware_builds_per_hour: int = 10
+    firmware_builds_per_hour: int = 60
     public_api_base_url: str = "http://localhost:8000"
 
 

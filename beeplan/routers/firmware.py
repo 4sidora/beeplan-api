@@ -31,6 +31,7 @@ from beeplan.firmware_catalog import (
     version_for,
 )
 from beeplan.models import Apiary, Concentrator, EdgeDevice, FirmwareBuild, User
+from beeplan.soft_delete import require_active_concentrator, require_active_edge
 from beeplan.schemas import FirmwareBuildCreate, FirmwareBuildOut, FirmwareReleaseOut
 
 router = APIRouter(prefix="/v1/firmware", tags=["firmware"])
@@ -51,8 +52,7 @@ def _verify_download_access(build_id: str, token: str | None, user: User | None)
 
 def _ensure_concentrator_owned(db: Session, user: User, concentrator_id: int) -> Concentrator:
     conc = db.get(Concentrator, concentrator_id)
-    if conc is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Concentrator not found")
+    require_active_concentrator(conc)
     apiary = db.get(Apiary, conc.apiary_id)
     if apiary is None or apiary.user_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Forbidden")
@@ -61,8 +61,7 @@ def _ensure_concentrator_owned(db: Session, user: User, concentrator_id: int) ->
 
 def _ensure_edge_owned(db: Session, user: User, edge_device_id: int) -> EdgeDevice:
     device = db.get(EdgeDevice, edge_device_id)
-    if device is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Edge device not found")
+    require_active_edge(device)
     _ensure_concentrator_owned(db, user, device.concentrator_id)
     return device
 
@@ -148,12 +147,39 @@ def _resolve_firmware_releases() -> FirmwareReleaseOut:
         )
 
 
-def _to_out(row: FirmwareBuild, request: Request) -> FirmwareBuildOut:
+def _parse_builder_progress(remote: dict) -> dict:
+    updated_raw = remote.get("updated_at")
+    updated_at = None
+    if updated_raw:
+        try:
+            updated_at = datetime.fromisoformat(str(updated_raw).replace("Z", "+00:00"))
+        except ValueError:
+            updated_at = None
+    return {
+        "phase": remote.get("phase"),
+        "log_tail": remote.get("log_tail"),
+        "progress_pct": remote.get("progress_pct"),
+        "updated_at": updated_at,
+    }
+
+
+def _builder_progress_for(row: FirmwareBuild) -> dict:
+    if row.status not in ("queued", "building"):
+        return {}
+    try:
+        remote = BuilderClient().get_build(row.id)
+    except Exception:  # noqa: BLE001
+        return {}
+    return _parse_builder_progress(remote)
+
+
+def _to_out(row: FirmwareBuild, request: Request, *, progress: dict | None = None) -> FirmwareBuildOut:
     manifest_url = None
     if row.status == "ready":
         base = _manifest_base_url(request)
         token = _download_token(row.id)
         manifest_url = f"{base}/v1/firmware/builds/{row.id}/manifest.json?token={token}"
+    extra = progress if progress is not None else _builder_progress_for(row)
     return FirmwareBuildOut(
         id=row.id,
         device_type=row.device_type,
@@ -168,6 +194,10 @@ def _to_out(row: FirmwareBuild, request: Request) -> FirmwareBuildOut:
         expires_at=row.expires_at,
         created_at=row.created_at,
         finished_at=row.finished_at,
+        phase=extra.get("phase"),
+        log_tail=extra.get("log_tail"),
+        progress_pct=extra.get("progress_pct"),
+        updated_at=extra.get("updated_at"),
     )
 
 
@@ -181,6 +211,9 @@ def _poll_builder(build_id: str) -> None:
             row = db.get(FirmwareBuild, build_id)
             if row is None:
                 return
+            if remote_status == "building" and row.status == "queued":
+                row.status = "building"
+                db.commit()
             if remote_status == "ready":
                 row.status = "ready"
                 row.finished_at = datetime.now(timezone.utc)
