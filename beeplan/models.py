@@ -46,6 +46,8 @@ class Concentrator(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     ingest_token: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
     gateway_mac: Mapped[str | None] = mapped_column(String(17), nullable=True)
+    wifi_channel: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    spool_pending_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     firmware_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -55,6 +57,23 @@ class Concentrator(Base):
     edge_devices: Mapped[list[EdgeDevice]] = relationship(
         back_populates="concentrator", passive_deletes=True
     )
+    telemetry: Mapped[list[ConcentratorTelemetrySample]] = relationship(
+        back_populates="concentrator", passive_deletes=True
+    )
+
+
+class ConcentratorTelemetrySample(Base):
+    """Телеметрия самой базовой станции (сигнал, батарея)."""
+
+    __tablename__ = "concentrator_telemetry_samples"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    concentrator_id: Mapped[int] = mapped_column(ForeignKey("concentrators.id", ondelete="CASCADE"))
+    metric: Mapped[str] = mapped_column(String(64), nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    value: Mapped[dict | list | str | float | int | bool | None] = mapped_column(JSON, nullable=False)
+
+    concentrator: Mapped[Concentrator] = relationship(back_populates="telemetry")
 
 
 class Colony(Base):
@@ -94,6 +113,7 @@ class EdgeDevice(Base):
     public_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     hardware_mac: Mapped[str | None] = mapped_column(String(17), nullable=True)
+    telemetry_slot_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)
     firmware_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     current_colony_id: Mapped[int | None] = mapped_column(ForeignKey("colonies.id", ondelete="SET NULL"), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -140,6 +160,17 @@ class EdgeDeviceColonyAssignment(Base):
         back_populates="assignments", foreign_keys=[device_id]
     )
     colony: Mapped[Colony] = relationship(back_populates="assignments")
+
+
+class TelemetryIngestLog(Base):
+    """Idempotent ingest dedup for ESP-NOW v2 report_id."""
+
+    __tablename__ = "telemetry_ingest_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("edge_devices.id", ondelete="CASCADE"))
+    report_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 
 
 class TelemetrySample(Base):

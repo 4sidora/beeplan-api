@@ -16,10 +16,12 @@ from sqlalchemy import delete, func, select
 
 from beeplan.colony_names import generate_colony_name
 from beeplan.database import SessionLocal
+from beeplan.firmware_catalog import EDGE_VERSION
 from beeplan.models import (
     Apiary,
     Colony,
     Concentrator,
+    ConcentratorTelemetrySample,
     EdgeDevice,
     EdgeDeviceColonyAssignment,
     TelemetrySample,
@@ -44,6 +46,23 @@ COLONIES = [
 
 INTERVAL_MINUTES = 30
 DAYS_BACK = 14
+# Устройство для демонстрации «серых областей» на графиках (public_id).
+GAP_DEMO_DEVICE_ID = "dev-edge-1"
+
+
+def _is_gap_demo_ts(ts: datetime, now: datetime) -> bool:
+    """Интервалы без телеметрии для демо-графиков (пропуски ≥ 1.5 ч при шаге 30 мин)."""
+    age = now - ts
+    # Первые ~2 суток периода — нет данных с начала выбранного интервала.
+    if age >= timedelta(days=DAYS_BACK - 2):
+        return True
+    # ~6 ч «тишины» около 5–6 суток назад.
+    if timedelta(days=5, hours=12) <= age <= timedelta(days=6, hours=6):
+        return True
+    # ~4 ч около 10 суток назад.
+    if timedelta(days=9, hours=18) <= age <= timedelta(days=10, hours=6):
+        return True
+    return False
 
 
 def _find_demo_colony(
@@ -127,6 +146,8 @@ def _ensure_colony_and_device(
         db.flush()
         db.add(EdgeDeviceColonyAssignment(device_id=device.id, colony_id=colony.id))
     else:
+        device.deleted_at = None
+        device.concentrator_id = conc.id
         device.current_colony_id = colony.id
         device.name = edge_name
         db.add(device)
@@ -167,12 +188,16 @@ def _generate_telemetry(
     phase: float,
     colony_index: int,
     now: datetime,
+    simulate_gaps: bool = False,
 ) -> list[TelemetrySample]:
     rows: list[TelemetrySample] = []
     steps = int(DAYS_BACK * 24 * 60 / INTERVAL_MINUTES)
     for step in range(steps, 0, -1):
         ts = now - timedelta(minutes=INTERVAL_MINUTES * step)
+        if simulate_gaps and _is_gap_demo_ts(ts, now):
+            continue
         day_index = (now.date() - ts.date()).days
+        t = ts.timestamp()
 
         rows.append(
             TelemetrySample(
@@ -192,6 +217,24 @@ def _generate_telemetry(
                 value={"percent": _rh_percent(ts, rh_base, phase)},
             )
         )
+        rows.append(
+            TelemetrySample(
+                colony_id=colony.id,
+                source_device_id=device.id,
+                metric="signal_level",
+                ts=ts,
+                value={"dbm": round(-55 - colony_index * 3 + 4 * math.sin(t / 6 + phase), 1)},
+            )
+        )
+        rows.append(
+            TelemetrySample(
+                colony_id=colony.id,
+                source_device_id=device.id,
+                metric="battery_percent",
+                ts=ts,
+                value={"percent": round(72 + colony_index * 4 + 6 * math.sin(t / 12 + phase), 1)},
+            )
+        )
         if step % 12 == 0:
             rows.append(
                 TelemetrySample(
@@ -200,6 +243,15 @@ def _generate_telemetry(
                     metric="audio_features",
                     ts=ts,
                     value=_audio_features(ts, colony_index),
+                )
+            )
+            rows.append(
+                TelemetrySample(
+                    colony_id=colony.id,
+                    source_device_id=device.id,
+                    metric="firmware_version",
+                    ts=ts,
+                    value={"version": EDGE_VERSION},
                 )
             )
     return rows
@@ -242,6 +294,8 @@ def main() -> None:
         if conc is None:
             print("Концентратор не найден. Запустите seed_dev.")
             return
+        conc.deleted_at = None
+        db.add(conc)
 
         colony_profiles = [
             (34.2, 58.0, 0.0),
@@ -322,6 +376,8 @@ def main() -> None:
         now = datetime.now(timezone.utc)
         all_rows: list[TelemetrySample] = []
         for idx, ((colony, device), (tb, rb, ph)) in enumerate(zip(pairs, colony_profiles)):
+            device.firmware_version = EDGE_VERSION
+            db.add(device)
             all_rows.extend(
                 _generate_telemetry(
                     colony,
@@ -331,8 +387,38 @@ def main() -> None:
                     phase=ph,
                     colony_index=idx,
                     now=now,
+                    simulate_gaps=device.public_id == GAP_DEMO_DEVICE_ID,
                 )
             )
+
+        conc_rows: list[ConcentratorTelemetrySample] = []
+        steps = int(DAYS_BACK * 24 * 60 / INTERVAL_MINUTES)
+        for step in range(steps, 0, -1):
+            ts = now - timedelta(minutes=INTERVAL_MINUTES * step)
+            t = ts.timestamp()
+            conc_rows.append(
+                ConcentratorTelemetrySample(
+                    concentrator_id=conc.id,
+                    metric="signal_level",
+                    ts=ts,
+                    value={"dbm": round(-58 + 5 * math.sin(t / 8), 1)},
+                )
+            )
+            conc_rows.append(
+                ConcentratorTelemetrySample(
+                    concentrator_id=conc.id,
+                    metric="battery_percent",
+                    ts=ts,
+                    value={"percent": round(88 + 4 * math.sin(t / 16), 1)},
+                )
+            )
+        if args.force:
+            db.execute(
+                delete(ConcentratorTelemetrySample).where(
+                    ConcentratorTelemetrySample.concentrator_id == conc.id
+                )
+            )
+        db.add_all(conc_rows)
 
         db.add_all(all_rows)
         db.commit()
@@ -342,6 +428,12 @@ def main() -> None:
         print(f"  Семей: {len(pairs)}, точек телеметрии: {len(all_rows)}")
         print(f"  Период: последние {DAYS_BACK} дн., шаг {INTERVAL_MINUTES} мин")
         print("  Имена семей:", ", ".join(c.name for c, _ in pairs))
+        gap_device = next((d for _, d in pairs if d.public_id == GAP_DEMO_DEVICE_ID), None)
+        if gap_device is not None:
+            print(
+                f"  Демо пропусков на графиках: {gap_device.name} ({GAP_DEMO_DEVICE_ID}) "
+                f"→ /devices/edge/{gap_device.id}"
+            )
         _print_summary(apiary, pairs, conc)
     finally:
         db.close()

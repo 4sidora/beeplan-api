@@ -102,9 +102,12 @@ class ConcentratorOut(BaseModel):
     name: str
     ingest_token: str
     gateway_mac: str | None = None
+    wifi_channel: int | None = None
+    spool_pending_count: int = 0
     last_seen_at: datetime | None = None
     firmware_version: str | None = None
     edge_device_count: int = 0
+    recent_telemetry: list[TelemetryPointOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -132,6 +135,7 @@ class EdgeDeviceOut(BaseModel):
     concentrator_name: str | None = None
     public_id: str
     name: str | None
+    telemetry_slot_sec: int | None = None
     current_colony_id: int | None
     last_seen_at: datetime | None = None
     firmware_version: str | None = None
@@ -145,6 +149,7 @@ class TelemetrySampleIn(BaseModel):
     metric: str = Field(max_length=64)
     ts: datetime
     value: dict | list | str | float | int | bool | None
+    report_id: str | None = Field(default=None, max_length=128)
 
 
 class TelemetryBatchIn(BaseModel):
@@ -155,6 +160,7 @@ class TelemetryBatchOut(BaseModel):
     inserted: int
     skipped: int
     errors: list[str] = []
+    accepted_report_ids: list[str] = Field(default_factory=list)
 
 
 class EdgeDeviceCreate(BaseModel):
@@ -174,6 +180,10 @@ class SetColonyBody(BaseModel):
 class ConcentratorHeartbeatIn(BaseModel):
     mac: str = Field(min_length=11, max_length=17)
     firmware_version: str | None = Field(default=None, max_length=32)
+    wifi_channel: int | None = Field(default=None, ge=1, le=13)
+    signal_dbm: int | None = Field(default=None, ge=-120, le=0, description="WiFi RSSI, dBm")
+    battery_percent: float | None = Field(default=None, ge=0, le=100)
+    spool_pending_count: int | None = Field(default=None, ge=0)
 
 
 class ConcentratorHeartbeatOut(BaseModel):
@@ -189,7 +199,7 @@ class FirmwareBuildCreate(BaseModel):
     wifi_ssid: str | None = Field(default=None, max_length=64)
     wifi_password: str | None = Field(default=None, max_length=128)
     api_base_url: str | None = Field(default=None, max_length=256)
-    wake_interval_sec: int = Field(default=600, ge=10, le=86400)
+    wake_interval_sec: int = Field(default=3600, ge=10, le=86400)
 
 
 class FirmwareBuildOut(BaseModel):

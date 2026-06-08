@@ -211,6 +211,8 @@ def delete_colony(
 
 
 def _to_concentrator_out(conc: Concentrator, db: Session) -> ConcentratorOut:
+    from beeplan.routers.devices import _recent_concentrator_telemetry
+
     apiary = db.get(Apiary, conc.apiary_id)
     device_count = db.scalar(
         select(func.count())
@@ -224,9 +226,12 @@ def _to_concentrator_out(conc: Concentrator, db: Session) -> ConcentratorOut:
         name=conc.name,
         ingest_token=conc.ingest_token,
         gateway_mac=conc.gateway_mac,
+        wifi_channel=conc.wifi_channel,
+        spool_pending_count=conc.spool_pending_count or 0,
         last_seen_at=conc.last_seen_at,
         firmware_version=conc.firmware_version,
         edge_device_count=int(device_count or 0),
+        recent_telemetry=_recent_concentrator_telemetry(db, conc.id),
     )
 
 

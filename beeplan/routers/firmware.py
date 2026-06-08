@@ -301,11 +301,24 @@ def create_firmware_build(
                 status.HTTP_400_BAD_REQUEST,
                 "Concentrator has no gateway_mac — flash gateway first",
             )
+        if conc.wifi_channel is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Concentrator has no wifi_channel — connect gateway to Wi-Fi first",
+            )
+        if device.telemetry_slot_sec is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Edge device has no telemetry_slot_sec assigned",
+            )
         edge_device_id = device.id
         payload["edge_config"] = {
             "gateway_mac": conc.gateway_mac,
             "device_public_id": device.public_id,
             "wake_interval_sec": body.wake_interval_sec,
+            "telemetry_slot_sec": device.telemetry_slot_sec,
+            "gateway_wifi_channel": conc.wifi_channel,
+            "device_type": "multisensor",
             "firmware_version": version_for("edge"),
             "firmware_serial_tag": serial_tag("edge"),
         }
