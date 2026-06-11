@@ -36,6 +36,8 @@ from beeplan.schemas import (
     EdgeDeviceCreate,
     EdgeDeviceOut,
     EdgeDeviceUpdate,
+    EdgeHeartbeatConfigOut,
+    GatewayBatchStatusIn,
     SetColonyBody,
     TelemetryBatchIn,
     TelemetryBatchOut,
@@ -156,6 +158,32 @@ def _store_concentrator_telemetry(
     )
 
 
+def _apply_gateway_batch_status(
+    db: Session,
+    concentrator_id: int,
+    gateway: GatewayBatchStatusIn | None,
+    ts: datetime,
+) -> None:
+    if gateway is None:
+        return
+    if gateway.signal_dbm is not None:
+        _store_concentrator_telemetry(
+            db,
+            concentrator_id,
+            "signal_level",
+            {"dbm": gateway.signal_dbm},
+            ts,
+        )
+    if gateway.battery_volts is not None:
+        _store_concentrator_telemetry(
+            db,
+            concentrator_id,
+            "battery_voltage",
+            {"volts": round(gateway.battery_volts, 2)},
+            ts,
+        )
+
+
 def _recent_device_telemetry(db: Session, device: EdgeDevice) -> list[TelemetryPointOut]:
     if device.current_colony_id is None:
         rows = list(
@@ -226,6 +254,7 @@ def _device_out(device: EdgeDevice, db: Session) -> EdgeDeviceOut:
         public_id=device.public_id,
         name=device.name,
         telemetry_slot_sec=device.telemetry_slot_sec,
+        wake_interval_sec=device.wake_interval_sec,
         current_colony_id=device.current_colony_id,
         last_seen_at=device.last_seen_at,
         firmware_version=device.firmware_version,
@@ -305,10 +334,12 @@ def list_edge_devices(
         _ensure_concentrator_owned(db, user, concentrator_id)
         devices = list(
             db.scalars(
-                select(EdgeDevice).where(
+                select(EdgeDevice)
+                .where(
                     EdgeDevice.concentrator_id == concentrator_id,
                     edge_active(),
                 )
+                .order_by(EdgeDevice.created_at.asc())
             ).all()
         )
         return [_device_out(d, db) for d in devices]
@@ -344,10 +375,12 @@ def list_edge_devices(
         return []
     devices = list(
         db.scalars(
-            select(EdgeDevice).where(
+            select(EdgeDevice)
+            .where(
                 EdgeDevice.concentrator_id.in_(conc_ids),
                 edge_active(),
             )
+            .order_by(EdgeDevice.created_at.asc())
         ).all()
     )
     return [_device_out(d, db) for d in devices]
@@ -413,6 +446,7 @@ def create_edge_device(
             public_id=public_id,
             name=device_name,
             telemetry_slot_sec=slot_sec,
+            wake_interval_sec=3600,
         )
         db.add(candidate)
         try:
@@ -444,6 +478,8 @@ def update_edge_device(
     device = _ensure_device_owned(db, user, device_id)
     if body.name is not None:
         device.name = body.name.strip() or device.name
+    if body.wake_interval_sec is not None:
+        device.wake_interval_sec = body.wake_interval_sec
     db.add(device)
     db.commit()
     db.refresh(device)
@@ -521,17 +557,25 @@ def concentrator_heartbeat(
             {"dbm": body.signal_dbm},
             now,
         )
-    if body.battery_percent is not None:
-        _store_concentrator_telemetry(
-            db,
-            concentrator.id,
-            "battery_percent",
-            {"percent": body.battery_percent},
-            now,
-        )
     db.add(concentrator)
     db.commit()
-    return ConcentratorHeartbeatOut(gateway_mac=mac)
+
+    edge_rows = list(
+        db.scalars(
+            select(EdgeDevice).where(
+                EdgeDevice.concentrator_id == concentrator.id,
+                edge_active(),
+            )
+        ).all()
+    )
+    edge_devices = [
+        EdgeHeartbeatConfigOut(
+            public_id=device.public_id,
+            wake_interval_sec=int(device.wake_interval_sec or 3600),
+        )
+        for device in edge_rows
+    ]
+    return ConcentratorHeartbeatOut(gateway_mac=mac, edge_devices=edge_devices)
 
 
 @router.post("/telemetry/batch", response_model=TelemetryBatchOut)
@@ -540,6 +584,9 @@ def ingest_telemetry(
     db: Session = Depends(get_db),
     concentrator: Concentrator = Depends(require_concentrator),
 ) -> TelemetryBatchOut:
+    if not body.samples:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty batch")
+
     inserted = 0
     skipped = 0
     errors: list[str] = []
@@ -547,6 +594,7 @@ def ingest_telemetry(
     now = datetime.now(timezone.utc)
     concentrator.last_seen_at = now
     db.add(concentrator)
+    _apply_gateway_batch_status(db, concentrator.id, body.gateway, now)
 
     def _insert_sample(device: EdgeDevice, s) -> None:
         nonlocal inserted

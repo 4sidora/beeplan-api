@@ -25,6 +25,8 @@ from beeplan.schemas import (
     ConcentratorNameOut,
     ConcentratorOut,
     ConcentratorUpdate,
+    BulkWakeIntervalBody,
+    BulkWakeIntervalOut,
 )
 from beeplan.soft_delete import (
     concentrator_active,
@@ -318,6 +320,32 @@ def update_concentrator(
     db.commit()
     db.refresh(conc)
     return _to_concentrator_out(conc, db)
+
+
+@router.patch(
+    "/concentrators/{concentrator_id}/edge-devices/wake-interval",
+    response_model=BulkWakeIntervalOut,
+)
+def bulk_set_edge_wake_interval(
+    concentrator_id: int,
+    body: BulkWakeIntervalBody,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> BulkWakeIntervalOut:
+    conc = _ensure_concentrator_owned(db, user, concentrator_id)
+    devices = list(
+        db.scalars(
+            select(EdgeDevice).where(
+                EdgeDevice.concentrator_id == conc.id,
+                edge_active(),
+            )
+        ).all()
+    )
+    for device in devices:
+        device.wake_interval_sec = body.wake_interval_sec
+        db.add(device)
+    db.commit()
+    return BulkWakeIntervalOut(updated=len(devices))
 
 
 @router.delete("/concentrators/{concentrator_id}", status_code=status.HTTP_204_NO_CONTENT)

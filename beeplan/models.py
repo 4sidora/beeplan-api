@@ -114,6 +114,7 @@ class EdgeDevice(Base):
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     hardware_mac: Mapped[str | None] = mapped_column(String(17), nullable=True)
     telemetry_slot_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    wake_interval_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)
     firmware_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     current_colony_id: Mapped[int | None] = mapped_column(ForeignKey("colonies.id", ondelete="SET NULL"), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

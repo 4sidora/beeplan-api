@@ -136,6 +136,7 @@ class EdgeDeviceOut(BaseModel):
     public_id: str
     name: str | None
     telemetry_slot_sec: int | None = None
+    wake_interval_sec: int | None = None
     current_colony_id: int | None
     last_seen_at: datetime | None = None
     firmware_version: str | None = None
@@ -152,8 +153,16 @@ class TelemetrySampleIn(BaseModel):
     report_id: str | None = Field(default=None, max_length=128)
 
 
+class GatewayBatchStatusIn(BaseModel):
+    signal_dbm: int | None = Field(default=None, ge=-120, le=0, description="WiFi RSSI шлюза, dBm")
+    battery_volts: float | None = Field(
+        default=None, ge=2.0, le=5.0, description="Напряжение батареи шлюза, V"
+    )
+
+
 class TelemetryBatchIn(BaseModel):
-    samples: list[TelemetrySampleIn]
+    samples: list[TelemetrySampleIn] = Field(default_factory=list)
+    gateway: GatewayBatchStatusIn | None = None
 
 
 class TelemetryBatchOut(BaseModel):
@@ -171,6 +180,20 @@ class EdgeDeviceCreate(BaseModel):
 
 class EdgeDeviceUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=255)
+    wake_interval_sec: int | None = Field(default=None, ge=10, le=86400)
+
+
+class BulkWakeIntervalBody(BaseModel):
+    wake_interval_sec: int = Field(ge=10, le=86400)
+
+
+class BulkWakeIntervalOut(BaseModel):
+    updated: int
+
+
+class EdgeHeartbeatConfigOut(BaseModel):
+    public_id: str
+    wake_interval_sec: int
 
 
 class SetColonyBody(BaseModel):
@@ -182,13 +205,13 @@ class ConcentratorHeartbeatIn(BaseModel):
     firmware_version: str | None = Field(default=None, max_length=32)
     wifi_channel: int | None = Field(default=None, ge=1, le=13)
     signal_dbm: int | None = Field(default=None, ge=-120, le=0, description="WiFi RSSI, dBm")
-    battery_percent: float | None = Field(default=None, ge=0, le=100)
     spool_pending_count: int | None = Field(default=None, ge=0)
 
 
 class ConcentratorHeartbeatOut(BaseModel):
     ok: bool = True
     gateway_mac: str
+    edge_devices: list[EdgeHeartbeatConfigOut] = Field(default_factory=list)
 
 
 class FirmwareBuildCreate(BaseModel):
@@ -203,6 +226,7 @@ class FirmwareBuildCreate(BaseModel):
     wifi_password: str | None = Field(default=None, max_length=128)
     api_base_url: str | None = Field(default=None, max_length=256)
     wake_interval_sec: int = Field(default=3600, ge=10, le=86400)
+    debug_serial: bool = Field(default=True, description="Подробный UART-лог в прошивке")
 
 
 class FirmwareBuildOut(BaseModel):

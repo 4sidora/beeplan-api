@@ -288,6 +288,7 @@ def create_firmware_build(
             "ingest_token": conc.ingest_token,
             "firmware_version": version_for(body.device_type),
             "firmware_serial_tag": serial_tag(body.device_type),
+            "debug_serial": body.debug_serial,
         }
         edge_device_id = None
     else:
@@ -311,6 +312,8 @@ def create_firmware_build(
                 status.HTTP_400_BAD_REQUEST,
                 "Edge device has no telemetry_slot_sec assigned",
             )
+        device.wake_interval_sec = body.wake_interval_sec
+        db.add(device)
         edge_device_id = device.id
         payload["edge_config"] = {
             "gateway_mac": conc.gateway_mac,
@@ -321,6 +324,7 @@ def create_firmware_build(
             "device_type": "multisensor",
             "firmware_version": version_for("edge"),
             "firmware_serial_tag": serial_tag("edge"),
+            "debug_serial": body.debug_serial,
         }
 
     row = FirmwareBuild(

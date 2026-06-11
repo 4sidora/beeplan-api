@@ -230,9 +230,15 @@ def _generate_telemetry(
             TelemetrySample(
                 colony_id=colony.id,
                 source_device_id=device.id,
-                metric="battery_percent",
+                metric="battery_voltage",
                 ts=ts,
-                value={"percent": round(72 + colony_index * 4 + 6 * math.sin(t / 12 + phase), 1)},
+                value={
+                    "volts": round(
+                        3.30
+                        + (72 + colony_index * 4 + 6 * math.sin(t / 12 + phase)) / 100 * 0.90,
+                        2,
+                    )
+                },
             )
         )
         if step % 12 == 0:
@@ -402,14 +408,6 @@ def main() -> None:
                     metric="signal_level",
                     ts=ts,
                     value={"dbm": round(-58 + 5 * math.sin(t / 8), 1)},
-                )
-            )
-            conc_rows.append(
-                ConcentratorTelemetrySample(
-                    concentrator_id=conc.id,
-                    metric="battery_percent",
-                    ts=ts,
-                    value={"percent": round(88 + 4 * math.sin(t / 16), 1)},
                 )
             )
         if args.force:
