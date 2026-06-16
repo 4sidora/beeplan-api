@@ -217,8 +217,8 @@ class ConcentratorHeartbeatOut(BaseModel):
 class FirmwareBuildCreate(BaseModel):
     device_type: str = Field(pattern="^(gateway|edge)$")
     board: str = Field(
-        default="esp32dev",
-        pattern="^(esp32dev|esp32c3|esp32c3-usb|ttgo-t-energy)$",
+        default="ttgo-t-energy",
+        pattern="^(ttgo-t-energy|ttgo-t-call-v14)$",
     )
     concentrator_id: int
     edge_device_id: int | None = None

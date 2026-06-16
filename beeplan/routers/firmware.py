@@ -31,6 +31,7 @@ from beeplan.firmware_catalog import (
     version_for,
 )
 from beeplan.models import Apiary, Concentrator, EdgeDevice, FirmwareBuild, User
+from beeplan.edge_slots import ensure_edge_telemetry_slot
 from beeplan.soft_delete import require_active_concentrator, require_active_edge
 from beeplan.schemas import FirmwareBuildCreate, FirmwareBuildOut, FirmwareReleaseOut
 
@@ -308,10 +309,7 @@ def create_firmware_build(
                 "Concentrator has no wifi_channel — connect gateway to Wi-Fi first",
             )
         if device.telemetry_slot_sec is None:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "Edge device has no telemetry_slot_sec assigned",
-            )
+            ensure_edge_telemetry_slot(db, device)
         device.wake_interval_sec = body.wake_interval_sec
         db.add(device)
         edge_device_id = device.id

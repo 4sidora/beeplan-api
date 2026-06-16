@@ -7,8 +7,8 @@ PROJECT_SLUG = "beeplan"
 GATEWAY_TYPE = "Gateway"
 EDGE_TYPE = "Edge"
 
-GATEWAY_VERSION = "0.2.13"
-EDGE_VERSION = "0.2.12"
+GATEWAY_VERSION = "0.2.14"
+EDGE_VERSION = "0.2.13"
 
 
 def profile_type(profile: str) -> str:
