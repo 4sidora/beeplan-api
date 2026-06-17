@@ -76,10 +76,19 @@ def _default_edge_name(public_id: str, device_type: str = "multisensor") -> str:
 
 def _normalize_mac(mac: str) -> str:
     cleaned = mac.strip().upper().replace("-", ":")
+    if ":" not in cleaned and len(cleaned) == 12 and all(c in "0123456789ABCDEF" for c in cleaned):
+        cleaned = ":".join(cleaned[i : i + 2] for i in range(0, 12, 2))
     parts = cleaned.split(":")
-    if len(parts) != 6 or not all(len(p) == 2 and all(c in "0123456789ABCDEF" for c in p) for p in parts):
+    if len(parts) != 6:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid MAC address format")
-    return ":".join(parts)
+    normalized: list[str] = []
+    for part in parts:
+        if len(part) == 1 and part in "0123456789ABCDEF":
+            part = f"0{part}"
+        if len(part) != 2 or not all(c in "0123456789ABCDEF" for c in part):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid MAC address format")
+        normalized.append(part)
+    return ":".join(normalized)
 
 
 def _telemetry_point(
