@@ -28,8 +28,7 @@ from beeplan.models import (
     User,
 )
 from beeplan.seed_dev import DEV_EMAIL
-from beeplan.edge_slots import ensure_edge_telemetry_slot
-from beeplan.radio_plan import assign_telemetry_slot
+from beeplan.radio_plan import MAX_DEVICES_PER_CONCENTRATOR
 
 APIARY_NAME = "Демо-пасека"
 CONCENTRATOR_NAME = "Базовая станция Бердск"
@@ -148,7 +147,6 @@ def _ensure_colony_and_device(
             public_id=public_id,
             name=edge_name,
             current_colony_id=colony.id,
-            telemetry_slot_sec=assign_telemetry_slot(int(active_on_conc or 0)),
             wake_interval_sec=3600,
         )
         db.add(device)
@@ -159,8 +157,6 @@ def _ensure_colony_and_device(
         device.concentrator_id = conc.id
         device.current_colony_id = colony.id
         device.name = edge_name
-        if device.telemetry_slot_sec is None:
-            ensure_edge_telemetry_slot(db, device)
         db.add(device)
 
     return colony, device

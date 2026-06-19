@@ -29,11 +29,7 @@ from beeplan.models import (
     TelemetrySample,
     User,
 )
-from beeplan.radio_plan import (
-    MAX_DEVICES_PER_CONCENTRATOR,
-    assign_telemetry_slot,
-)
-from beeplan.edge_slots import ensure_edge_telemetry_slot
+from beeplan.radio_plan import MAX_DEVICES_PER_CONCENTRATOR
 from beeplan.schemas import (
     ConcentratorHeartbeatIn,
     ConcentratorHeartbeatOut,
@@ -447,7 +443,6 @@ def create_edge_device(
             status.HTTP_409_CONFLICT,
             f"Concentrator at capacity ({MAX_DEVICES_PER_CONCENTRATOR} edge devices)",
         )
-    slot_sec = assign_telemetry_slot(int(active_count or 0))
     raw_name = (body.name or "").strip()
 
     device: EdgeDevice | None = None
@@ -458,7 +453,6 @@ def create_edge_device(
             concentrator_id=body.concentrator_id,
             public_id=public_id,
             name=device_name,
-            telemetry_slot_sec=slot_sec,
             wake_interval_sec=3600,
         )
         db.add(candidate)
@@ -476,20 +470,6 @@ def create_edge_device(
         _apply_colony_assignment(db, device, body.colony_id)
 
     db.add(device)
-    db.commit()
-    db.refresh(device)
-    return _device_out(device, db)
-
-
-@router.post("/edge-devices/{device_id}/ensure-telemetry-slot", response_model=EdgeDeviceOut)
-def ensure_edge_device_telemetry_slot(
-    device_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> EdgeDeviceOut:
-    """Назначить TDMA-слот устройству, если он не был задан при создании."""
-    device = _ensure_device_owned(db, user, device_id)
-    ensure_edge_telemetry_slot(db, device)
     db.commit()
     db.refresh(device)
     return _device_out(device, db)

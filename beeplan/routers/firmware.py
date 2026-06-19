@@ -31,7 +31,6 @@ from beeplan.firmware_catalog import (
     version_for,
 )
 from beeplan.models import Apiary, Concentrator, EdgeDevice, FirmwareBuild, User
-from beeplan.edge_slots import ensure_edge_telemetry_slot
 from beeplan.soft_delete import require_active_concentrator, require_active_edge
 from beeplan.schemas import FirmwareBuildCreate, FirmwareBuildOut, FirmwareReleaseOut
 
@@ -279,17 +278,32 @@ def create_firmware_build(
     }
 
     if body.device_type == "gateway":
-        if not body.wifi_ssid or not body.wifi_password:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "wifi_ssid and wifi_password required")
+        uplink = body.uplink_mode or "wifi"
+        if uplink == "wifi":
+            if not body.wifi_ssid or not body.wifi_password:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "wifi_ssid and wifi_password required for wifi uplink",
+                )
+        elif not body.cellular_apn:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "cellular_apn required for cellular uplink",
+            )
         api_url = (body.api_base_url or settings.public_api_base_url).rstrip("/")
         payload["gateway_config"] = {
-            "wifi_ssid": body.wifi_ssid,
-            "wifi_password": body.wifi_password,
+            "uplink_mode": uplink,
+            "wifi_ssid": body.wifi_ssid or "",
+            "wifi_password": body.wifi_password or "",
             "api_base_url": api_url,
             "ingest_token": conc.ingest_token,
             "firmware_version": version_for(body.device_type),
             "firmware_serial_tag": serial_tag(body.device_type),
             "debug_serial": body.debug_serial,
+            "gateway_wifi_channel": body.gateway_wifi_channel,
+            "cellular_apn": body.cellular_apn or "",
+            "cellular_user": body.cellular_user or "",
+            "cellular_pass": body.cellular_pass or "",
         }
         edge_device_id = None
     else:
@@ -308,8 +322,6 @@ def create_firmware_build(
                 status.HTTP_400_BAD_REQUEST,
                 "Concentrator has no wifi_channel — connect gateway to Wi-Fi first",
             )
-        if device.telemetry_slot_sec is None:
-            ensure_edge_telemetry_slot(db, device)
         device.wake_interval_sec = body.wake_interval_sec
         db.add(device)
         edge_device_id = device.id
@@ -317,7 +329,6 @@ def create_firmware_build(
             "gateway_mac": conc.gateway_mac,
             "device_public_id": device.public_id,
             "wake_interval_sec": body.wake_interval_sec,
-            "telemetry_slot_sec": device.telemetry_slot_sec,
             "gateway_wifi_channel": conc.wifi_channel,
             "device_type": "multisensor",
             "firmware_version": version_for("edge"),

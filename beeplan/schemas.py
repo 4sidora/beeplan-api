@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 class TokenOut(BaseModel):
@@ -222,11 +222,27 @@ class FirmwareBuildCreate(BaseModel):
     )
     concentrator_id: int
     edge_device_id: int | None = None
+    uplink_mode: str = Field(default="wifi", pattern="^(wifi|cellular)$")
     wifi_ssid: str | None = Field(default=None, max_length=64)
     wifi_password: str | None = Field(default=None, max_length=128)
     api_base_url: str | None = Field(default=None, max_length=256)
+    gateway_wifi_channel: int = Field(default=6, ge=1, le=13)
+    cellular_apn: str | None = Field(default=None, max_length=64)
+    cellular_user: str | None = Field(default=None, max_length=64)
+    cellular_pass: str | None = Field(default=None, max_length=64)
     wake_interval_sec: int = Field(default=3600, ge=10, le=86400)
     debug_serial: bool = Field(default=True, description="Подробный UART-лог в прошивке")
+
+    @model_validator(mode="after")
+    def validate_gateway_uplink(self) -> "FirmwareBuildCreate":
+        if self.device_type != "gateway":
+            return self
+        if self.uplink_mode == "wifi":
+            if not self.wifi_ssid or not self.wifi_password:
+                raise ValueError("wifi_ssid and wifi_password required for wifi uplink")
+        elif not self.cellular_apn:
+            raise ValueError("cellular_apn required for cellular uplink")
+        return self
 
 
 class FirmwareBuildOut(BaseModel):
