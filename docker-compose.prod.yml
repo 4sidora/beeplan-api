@@ -1,0 +1,64 @@
+# Production stack for beeplan.tech VPS.
+# Deploy: scripts/deploy-prod.ps1 (copies this file to the server).
+# Run from /opt/beeplan/beeplan-api with: source .env.prod
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: beeplan
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: beeplan
+    volumes:
+      - beeplan_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U beeplan -d beeplan"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  builder:
+    build:
+      context: ..
+      dockerfile: beeplan-builder/Dockerfile
+      args:
+        PREFETCH_GATEWAY: ${PREFETCH_GATEWAY:-1}
+        PREFETCH_EDGE: ${PREFETCH_EDGE:-1}
+    volumes:
+      - firmware_artifacts:/artifacts
+      - firmware_workdir:/workdir
+      # Live firmware + builder Python from host (Quick deploy = scp + restart)
+      - ../beeplan-gateway:/firmware/gateway
+      - ../beeplan-edge:/firmware/edge
+      - ../beeplan-builder/builder:/app/builder
+    environment:
+      BEEPLAN_BUILDER_SECRET: ${BUILDER_SECRET}
+      BEEPLAN_WORKDIR: /workdir
+    restart: unless-stopped
+
+  api:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - .env.prod
+    environment:
+      DATABASE_URL: postgresql+psycopg2://beeplan:${POSTGRES_PASSWORD}@db:5432/beeplan
+      JWT_SECRET: ${JWT_SECRET}
+      BUILDER_URL: http://builder:9000
+      BUILDER_SECRET: ${BUILDER_SECRET}
+      PUBLIC_API_BASE_URL: https://api.beeplan.tech
+      CORS_ORIGINS: https://beeplan.tech,https://www.beeplan.tech
+      FIRMWARE_BUILDS_PER_HOUR: 60
+    depends_on:
+      db:
+        condition: service_healthy
+      builder:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  beeplan_pg:
+  firmware_artifacts:
+  firmware_workdir:

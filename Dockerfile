@@ -15,4 +15,4 @@ COPY beeplan ./beeplan
 ENV PYTHONPATH=/app
 EXPOSE 8000
 
-CMD alembic upgrade head && uvicorn beeplan.main:app --host 0.0.0.0 --port 8000 --workers 2
+CMD alembic upgrade head && uvicorn beeplan.main:app --host 0.0.0.0 --port 8000 --workers 4

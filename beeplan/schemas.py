@@ -232,6 +232,11 @@ class FirmwareBuildCreate(BaseModel):
     cellular_pass: str | None = Field(default=None, max_length=64)
     wake_interval_sec: int = Field(default=3600, ge=10, le=86400)
     debug_serial: bool = Field(default=True, description="Подробный UART-лог в прошивке")
+    edge_product_type: str = Field(default="multisensor", pattern="^(multisensor|scales)$")
+    hx711_dout_pin: int = Field(default=1, ge=0, le=21)
+    hx711_sck_pin: int = Field(default=3, ge=0, le=21)
+    ds18b20_pin: int = Field(default=4, ge=0, le=21)
+    weight_mode: str = Field(default="full", pattern="^(full|half)$")
 
     @model_validator(mode="after")
     def validate_gateway_uplink(self) -> "FirmwareBuildCreate":

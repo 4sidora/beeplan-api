@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -322,6 +322,7 @@ def create_firmware_build(
                 status.HTTP_400_BAD_REQUEST,
                 "Concentrator has no wifi_channel — connect gateway to Wi-Fi first",
             )
+        edge_channel = conc.wifi_channel
         device.wake_interval_sec = body.wake_interval_sec
         db.add(device)
         edge_device_id = device.id
@@ -329,8 +330,12 @@ def create_firmware_build(
             "gateway_mac": conc.gateway_mac,
             "device_public_id": device.public_id,
             "wake_interval_sec": body.wake_interval_sec,
-            "gateway_wifi_channel": conc.wifi_channel,
-            "device_type": "multisensor",
+            "gateway_wifi_channel": edge_channel,
+            "device_type": body.edge_product_type,
+            "hx711_dout_pin": body.hx711_dout_pin,
+            "hx711_sck_pin": body.hx711_sck_pin,
+            "ds18b20_pin": body.ds18b20_pin,
+            "weight_mode": body.weight_mode,
             "firmware_version": version_for("edge"),
             "firmware_serial_tag": serial_tag("edge"),
             "debug_serial": body.debug_serial,
@@ -447,5 +452,7 @@ def get_firmware_artifact(
     _verify_download_access(build_id, token, user)
     _get_ready_build_public(db, user, build_id)
     client = BuilderClient()
-    content = client.fetch_artifact(build_id, artifact_name)
-    return Response(content=content, media_type="application/octet-stream")
+    return StreamingResponse(
+        client.stream_artifact(build_id, artifact_name),
+        media_type="application/octet-stream",
+    )

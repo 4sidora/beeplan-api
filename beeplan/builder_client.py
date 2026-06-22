@@ -44,6 +44,30 @@ class BuilderClient:
             resp.raise_for_status()
             return resp.content
 
+    def stream_artifact(self, build_id: str, artifact_name: str):
+        """Stream artifact bytes from builder (keeps API worker memory low)."""
+        client = httpx.Client(timeout=120.0)
+        resp = client.send(
+            client.build_request(
+                "GET",
+                f"{self.base_url}/v1/builds/{build_id}/{artifact_name}",
+                headers=self._headers(),
+            ),
+            stream=True,
+        )
+        resp.raise_for_status()
+
+        def generate():
+            try:
+                for chunk in resp.iter_bytes(64 * 1024):
+                    if chunk:
+                        yield chunk
+            finally:
+                resp.close()
+                client.close()
+
+        return generate
+
     def fetch_firmware(self, build_id: str) -> bytes:
         return self.fetch_artifact(build_id, "firmware.bin")
 
