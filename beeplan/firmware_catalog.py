@@ -8,7 +8,7 @@ GATEWAY_TYPE = "Gateway"
 EDGE_TYPE = "Edge"
 
 GATEWAY_VERSION = "0.2.30"
-EDGE_VERSION = "0.3.0"
+EDGE_VERSION = "0.3.1"
 
 
 def profile_type(profile: str) -> str:
