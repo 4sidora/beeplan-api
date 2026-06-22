@@ -7,7 +7,7 @@ PROJECT_SLUG = "beeplan"
 GATEWAY_TYPE = "Gateway"
 EDGE_TYPE = "Edge"
 
-GATEWAY_VERSION = "0.2.29"
+GATEWAY_VERSION = "0.2.30"
 EDGE_VERSION = "0.3.0"
 
 
